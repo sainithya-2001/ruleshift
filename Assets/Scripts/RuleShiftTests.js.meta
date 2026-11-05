@@ -29,6 +29,8 @@
   PackagePolicy: CanBeUnpacked
   ScriptInputsHidden:
     controller: false
+    liveImagine: false
+    liveImaginePrompt: false
     runTests: false
   ScriptTypesHidden:
     {}
@@ -41,6 +43,8 @@
   DefaultScriptInputs:
     - controller: !<reference.ScriptComponent> 00000000-0000-0000-0000-000000000000
       runTests: false
+      liveImagine: false
+      liveImaginePrompt: a glowing jellyfish
   ScriptTypes:
     -
       {}

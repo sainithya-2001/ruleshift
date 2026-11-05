@@ -1,5 +1,7 @@
 // @input Component.ScriptComponent controller
 // @input bool runTests = false
+// @input bool liveImagine = false
+// @input string liveImaginePrompt = "a glowing jellyfish"
 
 // Self-driving test harness for RULESHIFT. Set runTests=true, run Preview, read the RULESHIFT TEST lines.
 if (script.runTests) {
@@ -418,5 +420,39 @@ if (script.runTests) {
         if (wait > 0) { return; }
         var r = gen.next();
         if (r.done) { gen = null; } else { wait = r.value; }
+    });
+}
+
+// Live Snap3D check (needs a local token): one real generation through the REAL generator, timed, then linked to another object.
+if (script.liveImagine) {
+    script.createEvent("OnStartEvent").bind(function () {
+        var api = script.controller.api, T = api.test, t0 = 0, st = "start", z = -95;
+        var ev = script.createEvent("UpdateEvent");
+        var elapsed = 0, linked = false;
+        ev.bind(function (e) {
+            elapsed += e.getDeltaTime();
+            if (st === "start" && elapsed > 1) {
+                api.clearAll();
+                api.spawn({ shape: "sphere", color: [0, 0.85, 1], sizeKey: "M", name: "Anchor orb" });
+                T.place(0, new vec3(-9, -4, z));
+                api.imagineTimeout(120);
+                t0 = elapsed; var idx = api.imagine(script.liveImaginePrompt);
+                T.place(idx, new vec3(9, -4, z));
+                print("RULESHIFT LIVE start '" + script.liveImaginePrompt + "' node " + idx);
+                st = "wait";
+            } else if (st === "wait") {
+                var job = T.nodes[1] && T.nodes[1].job;
+                if (job && job.state !== "pending" && !linked) {
+                    linked = true;
+                    print("RULESHIFT LIVE result state=" + job.state + (job.reason ? " reason=" + job.reason : "") + " after " + (elapsed - t0).toFixed(1) + "s");
+                    if (job.state === "ok") {
+                        T.connect(0, 1, "ATTRACT");
+                        var n = T.nodes[1];
+                        print("RULESHIFT LIVE linked | imagined=" + n.imagined + " radius=" + n.radius.toFixed(2) + " fit=" + JSON.stringify(job.bounds) + " links=" + T.connections.length);
+                    }
+                    st = "done";
+                }
+            }
+        });
     });
 }

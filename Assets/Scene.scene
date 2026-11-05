@@ -2656,12 +2656,16 @@
   ScriptAsset: !<reference> 004f0b7d-69de-42c8-b8b6-a214953f568b
   ScriptInputsDefault:
     runTests: true
+    liveImagine: true
+    liveImaginePrompt: true
   ScriptTypesDefault:
     {}
   ScriptInputs:
     "":
       controller: !<reference.ScriptComponent> 4aef1a10-019c-4696-a7b1-b4bd90edb0eb
       runTests: false
+      liveImagine: false
+      liveImaginePrompt: a glowing jellyfish
   ScriptTypes:
     "":
       {}
