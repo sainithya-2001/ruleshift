@@ -561,7 +561,27 @@ if (script.runTests) {
         api.activate(); yield 4;
         lbad = 0; T.connections.forEach(function (c) { var li = T.labelInfo(c); if (!li.ext || li.hits) { lbad++; } });
         check("18 ...and stays clear while the nodes move", lbad === 0, "bad " + lbad);
+        check("18 No two link labels overlap each other", T.labelOverlaps() === 0, "overlaps " + T.labelOverlaps());
         api.reset(); api.clearAll(); yield 0.2;
+
+        // 19 recording setup: demoPreset opens on an empty stage; demoStage "chain" sets up gem / orb / cube with links ready
+        script.controller.demoStage = "chain"; api.applyDemoSetup(); yield 0.5;
+        var nm19 = nodes.map(function (n) { return n.obj.name; }).join(",");
+        var minD19 = 1e9; for (var i19 = 0; i19 < nodes.length; i19++) { for (var j19 = i19 + 1; j19 < nodes.length; j19++) { minD19 = Math.min(minD19, nodes[i19].pos.distance(nodes[j19].pos) - nodes[i19].radius - nodes[j19].radius); } }
+        check("19 chain: gem, orb and cube spawn, spread apart (no two touching)", nm19 === "Gem,Orb,Cube" && minD19 > 1.5, nm19 + " gap " + minD19.toFixed(1));
+        var go19 = T.slots.filter(function (c) { return c.active && c.A.obj.name === "Gem"; })[0], oc19 = T.slots.filter(function (c) { return c.active && c.B.obj.name === "Cube"; })[0];
+        check("19 chain: links ready (gem-orb ATTRACT, orb-cube COLLISION TRIGGER)", conns.length === 2 && !!go19 && !!oc19 && go19.rule === "ATTRACT" && oc19.rule === "COLLISION_TRIGGER");
+        check("19 chain: starts in creation (press Play), no placement hint, gem glows", api.getState() === "creation" && T.hintVisible() === false && nodes[0].glowOn === true);
+        yield 0.3; var lo19 = 0; T.connections.forEach(function (c) { var li = T.labelInfo(c); if (!li.ext || li.hits) { lo19++; } });
+        check("19 chain: opening frame has no overlapping labels (node or label)", lo19 === 0 && T.labelOverlaps() === 0, "bad " + lo19 + " label-label " + T.labelOverlaps());
+        api.activate(); var g19 = 0, fired19 = -1;
+        while (g19 < 12 && T.fires(oc19) < 1) { yield 0.25; g19 += 0.25; }
+        check("19 chain: the attract pull brings the orb to the cube and the collision fires", T.fires(oc19) >= 1, "after " + g19.toFixed(2) + "s");
+        var g19b = 0; while (g19b < 4 && go19.rule !== "REPEL") { yield 0.2; g19b += 0.2; }
+        check("19 chain: the pulse flips gem-orb to REPEL (chain reaction)", go19.rule === "REPEL", "rule " + go19.rule);
+        api.reset(); yield 0.2;
+        script.controller.demoStage = ""; api.applyDemoSetup(); yield 0.4;
+        check("19 demoPreset opening: empty stage, no placement hint, creation state", nodes.length === 0 && T.hintVisible() === false && api.getState() === "creation");
 
         api.reset();
         var pass = results.filter(function (r) { return r; }).length;

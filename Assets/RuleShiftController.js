@@ -3,6 +3,7 @@
 // @input float strength = 0.8
 // @input bool debugAutoToggle = false
 // @input bool demoPreset = false
+// @input string demoStage = ""
 // @input Component.Camera camera
 // @input Asset.Material imagineMaterial
 
@@ -693,12 +694,17 @@ function labelExtent(c) {   // half-size and centre offset of the label text in 
     if (!(w > 0) || !(h > 0)) { return null; }
     return { hw: w / 2, hh: h / 2, ox: (bb.left + bb.right) / 2 * sc, oy: (bb.top + bb.bottom) / 2 * sc };
 }
-function labelHitsNode(p, e) {   // compare in screen (angular) space: label rectangle vs each node's disc
+var placedLabels = [];   // this frame's already-placed label rectangles (screen/angular space), so labels never sit on each other either
+function labelHitsNode(p, e, self) {   // compare in screen (angular) space: label rectangle vs each node's disc and vs the other labels
     var dep = Math.max(-p.z, 1), lx = (p.x + e.ox) / dep, ly = (p.y + e.oy) / dep, hw = e.hw / dep, hh = e.hh / dep;
     for (var i = 0; i < nodes.length; i++) {
         var n = nodes[i], nd = Math.max(-n.pos.z, 1), nr = n.radius / nd;
         var dx = Math.max(Math.abs(lx - n.pos.x / nd) - hw, 0), dy = Math.max(Math.abs(ly - n.pos.y / nd) - hh, 0);
         if (dx * dx + dy * dy < nr * nr) { return true; }
+    }
+    for (var j = 0; j < placedLabels.length; j++) {
+        var r = placedLabels[j];
+        if (r.c !== self && Math.abs(lx - r.x) < hw + r.hw && Math.abs(ly - r.y) < hh + r.hh) { return true; }
     }
     return false;
 }
@@ -711,8 +717,9 @@ function updateLabel(c) {
     var lp = mid.add(toCam.uniformScale(22)).add(new vec3(dx, 7, 0));
     // never sit on top of an object: if the label's screen footprint touches any node, nudge it upward until clear
     var ext = labelExtent(c), nudged = 0;
-    if (ext) { while (nudged < LABEL_NUDGE_MAX && labelHitsNode(lp, ext)) { lp = lp.add(new vec3(0, LABEL_NUDGE_STEP, 0)); nudged += LABEL_NUDGE_STEP; } }
+    if (ext) { while (nudged < LABEL_NUDGE_MAX && labelHitsNode(lp, ext, c)) { lp = lp.add(new vec3(0, LABEL_NUDGE_STEP, 0)); nudged += LABEL_NUDGE_STEP; } }
     c.labelNudge = nudged;
+    if (ext) { var ddp = Math.max(-lp.z, 1); c.lblRect = { c: c, x: (lp.x + ext.ox) / ddp, y: (lp.y + ext.oy) / ddp, hw: ext.hw / ddp, hh: ext.hh / ddp }; placedLabels.push(c.lblRect); }
     c.labelTr.setWorldPosition(lp);
     c.label.text = LABEL_TEXT[c.rule];
     var k = RULE_COLOR[c.rule];
@@ -784,6 +791,24 @@ function loadDemo() {   // the starting set used for the video: pink, cyan, yell
     pendingPlace = null;
 }
 
+// Recording setup (demoPreset): the opening is an empty stage; demoStage = "chain" starts with gem, orb and cube spread across
+// the stage and linked (light orb, heavy gem, large cube): gem-orb ATTRACT (the pull) and orb-cube COLLISION TRIGGER (the chain reaction: when the orb meets the cube
+// a pulse runs down the gem-orb link and flips it to REPEL). Press Play to start it.
+function loadChain() {
+    clearAll();
+    var gem = spawnNode({ shape: "crystal", color: NODE_COLORS[0], size: 10, glow: true, weight: "heavy", pos: new vec3(12, -4, WORLD_Z), name: "Gem" });
+    var orb = spawnNode({ shape: "sphere", color: NODE_COLORS[1], size: 10, weight: "light", pos: new vec3(-12, -4, WORLD_Z), name: "Orb" });
+    var cube = spawnNode({ shape: "cube", color: NODE_COLORS[2], size: 14, pos: new vec3(-2, 6, WORLD_Z), name: "Cube" });
+    activateLink(slotFor(gem, orb, true), RULES.ATTRACT, true);
+    activateLink(slotFor(orb, cube, true), RULES.COLLISION_TRIGGER, true);
+    pendingPlace = null;   // everything is already placed: no placement hint
+    print("RULESHIFT demo stage: chain");
+}
+function applyDemoSetup() {
+    if (script.demoStage === "chain") { loadChain(); } else { clearAll(); pendingPlace = null; }
+}
+script.api.loadChain = loadChain;
+script.api.applyDemoSetup = applyDemoSetup;
 script.api.getState = function () { return state; };
 script.api.onState = function (f) { stateListeners.push(f); f(state); };
 script.api.activate = function () { if (state === "creation") { setState("live"); } };
@@ -857,9 +882,10 @@ script.api.test = {   // read/write hooks for RuleShiftTests.js
     linkColor: function (c) { var k = c.rmv.mainPass.baseColor; return k.r.toFixed(2) + "," + k.g.toFixed(2) + "," + k.b.toFixed(2); },
     place: function (i, v) { var n = nodes[i]; n.pos = new vec3(v.x, v.y, v.z); n.vel = vec3.zero(); n.tr.setLocalPosition(n.pos); },
     connect: function (i, j, rule) { var c = slotFor(nodes[i], nodes[j], true); if (!c.active) { activateLink(c, rule || RULES.ATTRACT, true); } return c; },
-    labelInfo: function (c) { var e = labelExtent(c); var p = c.labelTr.getWorldPosition(); return { ext: e, nudge: c.labelNudge, y: p.y, hits: e ? labelHitsNode(p, e) : null }; },
+    labelInfo: function (c) { var e = labelExtent(c); var p = c.labelTr.getWorldPosition(); return { ext: e, nudge: c.labelNudge, y: p.y, hits: e ? labelHitsNode(p, e, c) : null }; },
     fires: function (c) { return c.fires || 0; },
     hintVisible: function () { return hintObj.enabled; },
+    labelOverlaps: function () { var n = 0, cs = connections; for (var i = 0; i < cs.length; i++) { for (var j = i + 1; j < cs.length; j++) { var a = cs[i].lblRect, b = cs[j].lblRect; if (a && b && Math.abs(a.x - b.x) < a.hw + b.hw && Math.abs(a.y - b.y) < a.hh + b.hh) { n++; } } } return n; },
     glowInfo: function (i) { var n = nodes[i]; return n.glow.map(function (o) { var p = o.getComponent("Component.RenderMeshVisual").mainPass; return { blend: p.blendMode, alpha: p.baseColor.a }; }); }
 };
 
@@ -909,11 +935,12 @@ script.createEvent("UpdateEvent").bind(function (e) {
     updateSelection();
     hintObj.enabled = !!pendingPlace && !goalEnabled;
     updateGoal(Math.min(e.getDeltaTime(), 0.25));   // real time, so goal timers don't slow down at low frame rates
+    placedLabels.length = 0;
     connections.forEach(updateLabel);
     connections.forEach(updateVisual);
 });
 script.createEvent("OnStartEvent").bind(function () {
-    if (script.demoPreset) { loadDemo(); }
+    if (script.demoPreset) { applyDemoSetup(); }
     initWorldQuery();
     var wqDelay = script.createEvent("DelayedCallbackEvent");
     wqDelay.bind(function () {   // one-time Preview probe: does WorldQuery return real hits here?
