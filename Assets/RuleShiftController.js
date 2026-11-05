@@ -145,7 +145,7 @@ function checkCollisions() {
     connections.forEach(function (c) {
         if (c.rule !== RULES.COLLISION_TRIGGER || elapsed < c.cooldownUntil) { return; }
         var A = nodes[c.a], B = nodes[c.b];
-        if (A.pos.distance(B.pos) > A.radius + B.radius) { return; }
+        if (A.pos.distance(B.pos) > A.radius + B.radius + 0.1) { return; }
         c.cooldownUntil = elapsed + TOUCH_COOLDOWN;
         A.pulse = 0; B.pulse = 0;
         print("RULESHIFT COLLISION " + A.obj.name + "-" + B.obj.name);
@@ -179,7 +179,7 @@ function integrate(dt) {
         var p = n.pos.add(n.vel.uniformScale(dt));
         var cx = n.initial.x, cy = n.initial.y, cz = n.initial.z;
         p.x = Math.max(-BOUND, Math.min(BOUND, p.x));
-        p.y = Math.max(cy - 25, Math.min(cy + 25, p.y));
+        p.y = Math.max(cy - 25, Math.min(Math.min(cy + 25, WORLD_CEIL), p.y));
         p.z = Math.max(cz - 25, Math.min(cz + 25, p.z));
         n.pos = p;
         n.tr.setLocalPosition(p);
@@ -216,8 +216,8 @@ function makeText(name, size, pos, col) {
     nodes.forEach(function (n) { top = Math.max(top, n.initial.y); z += n.initial.z / nodes.length; });
     var parent = nodes[0].obj.getParent();
     var base = parent ? parent.getTransform().getWorldPosition().y : 0;
-    var g = makeText("Goal Text", 100, new vec3(0, top + base + 25, z), new vec4(1, 1, 1, 1));
-    var nx = makeText("Next Text", 62, new vec3(0, top + base + 11, z), new vec4(0.75, 0.9, 1, 0.9));
+    var g = makeText("Goal Text", 100, new vec3(0, top + base + 22, z), new vec4(1, 1, 1, 1));
+    var nx = makeText("Next Text", 62, new vec3(0, top + base + 16.5, z), new vec4(0.75, 0.9, 1, 0.9));
     goalTr = g.tr; goalText = g.text; nextText = nx.text;
     goalText.text = GOAL_1;
     nextText.text = "Next: " + GOAL_2;
@@ -240,7 +240,7 @@ function updateGoal(dt) {
         goalTr.setLocalScale(vec3.one().uniformScale(1 + 0.3 * k));
     }
     if (goalStage === 0) {
-        if (state === "live" && !nodes[2].dragging && nodes[2].pos.distance(nodes[0].pos) <= nodes[2].radius + nodes[0].radius) {
+        if (state === "live" && !nodes[2].dragging && nodes[2].pos.distance(nodes[0].pos) <= nodes[2].radius + nodes[0].radius + 0.1) {
             goalStage = 1; goalTimer = 0; startGoalPulse();
             goalText.text = "Rule rewritten! \u2728";
             print("RULESHIFT goal 1 complete");
@@ -252,6 +252,23 @@ function updateGoal(dt) {
         var still = nodes.every(function (n) { return n.vel.length < 1.5 && !n.dragging; });
         settleTime = (state === "live" && still && isTriangle()) ? settleTime + dt : 0;
         if (settleTime > 1.5) { goalStage = 3; startGoalPulse(); goalText.text = "Triangle! Rule rewritten! \u2728"; print("RULESHIFT goal 2 complete"); }
+    }
+}
+var WORLD_CEIL = 10;   // keeps spheres and labels below the challenge panel
+// Soft collision: any overlapping pair is pushed apart to exactly touching. A grabbed sphere is never pushed.
+function resolveOverlaps() {
+    for (var i = 0; i < nodes.length; i++) {
+        for (var j = i + 1; j < nodes.length; j++) {
+            var A = nodes[i], B = nodes[j];
+            var d = B.pos.sub(A.pos), dist = d.length, minD = A.radius + B.radius;
+            if (dist >= minD) { continue; }
+            var dir = dist > 0.001 ? d.uniformScale(1 / dist) : new vec3(1, 0, 0);
+            var pen = minD - dist;
+            var wA = A.dragging ? 0 : (B.dragging ? 1 : 0.5), wB = B.dragging ? 0 : (A.dragging ? 1 : 0.5);
+            A.pos = A.pos.sub(dir.uniformScale(pen * wA)); B.pos = B.pos.add(dir.uniformScale(pen * wB));
+            if (!A.dragging) { A.tr.setLocalPosition(A.pos); }
+            if (!B.dragging) { B.tr.setLocalPosition(B.pos); }
+        }
     }
 }
 var UP = new vec3(0, 1, 0);
@@ -330,8 +347,9 @@ script.createEvent("UpdateEvent").bind(function (e) {
     if (state === "live") {
         computeForces();
         integrate(dt);
-        checkCollisions();
     }
+    resolveOverlaps();
+    if (state === "live") { checkCollisions(); }
     updatePulses(dt);
     updateGoal(dt);
     labelAlpha += ((state === "live" ? 0.2 : 1) - labelAlpha) * Math.min(1, dt * 6);
