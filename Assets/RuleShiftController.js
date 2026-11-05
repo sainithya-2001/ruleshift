@@ -840,13 +840,15 @@ function parseVoice(text) {
     var words = String(text || "").toLowerCase().replace(/[^a-z\s-]/g, " ").replace(/-/g, " ").split(/\s+/).filter(function (w) { return w.length > 0; });
     var out = { found: false, shape: null, color: null, sizeKey: null, glow: null, weight: null, bounce: null };
     function match(list, w) { return list.indexOf(w) >= 0 || (w.length > 3 && w.charAt(w.length - 1) === "s" && list.indexOf(w.slice(0, -1)) >= 0); }
-    words.forEach(function (w) {
+    function isColor(w) { for (var q = 0; q < VOICE_WORDS.color.length; q++) { if (match(VOICE_WORDS.color[q], w)) { return true; } } return false; }
+    words.forEach(function (w, wi) {
         var k;
+        var lightShade = (w === "light" && wi + 1 < words.length && isColor(words[wi + 1]));   // "light blue": a shade, not the weight
         if (out.shape === null) { for (k in VOICE_WORDS.shape) { if (match(VOICE_WORDS.shape[k], w)) { out.shape = k; break; } } }
         if (out.color === null) { for (var ci = 0; ci < VOICE_WORDS.color.length; ci++) { if (match(VOICE_WORDS.color[ci], w)) { out.color = ci; break; } } }
         if (out.sizeKey === null) { for (k in VOICE_WORDS.size) { if (match(VOICE_WORDS.size[k], w)) { out.sizeKey = k; break; } } }
         if (out.glow === null) { if (match(VOICE_WORDS.glowOn, w)) { out.glow = true; } else if (match(VOICE_WORDS.glowOff, w)) { out.glow = false; } }
-        if (out.weight === null) { for (k in VOICE_WORDS.weight) { if (match(VOICE_WORDS.weight[k], w)) { out.weight = k; break; } } }
+        if (out.weight === null && !lightShade) { for (k in VOICE_WORDS.weight) { if (match(VOICE_WORDS.weight[k], w)) { out.weight = k; break; } } }
         if (out.bounce === null) { for (k in VOICE_WORDS.bounce) { if (match(VOICE_WORDS.bounce[k], w)) { out.bounce = k; break; } } }
     });
     out.found = out.shape !== null;

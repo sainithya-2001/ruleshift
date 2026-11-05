@@ -283,6 +283,9 @@ if (script.runTests) {
             else { ok = r.found === true; for (k in ex) { if (r[k] !== ex[k]) { ok = false; } } }
             check("13 Voice parse: '" + c[0] + "'", ok, JSON.stringify(r));
         });
+        var lb = api.parseVoice("a light blue cube"), lg = api.parseVoice("light green sphere"), lw = api.parseVoice("a light blue cube that is light");
+        check("13 Voice parse: 'light blue' is a colour, not the weight", lb.color === 1 && lb.weight === null && lg.color === 3 && lg.weight === null, JSON.stringify(lb));
+        check("13 Voice parse: 'light' not before a colour still means light weight", lw.color === 1 && lw.weight === "light" && api.parseVoice("a light cube").weight === "light", JSON.stringify(lw));
         var vp = api.parseVoice("a cube");
         check("13 Voice parse: missing parameters stay null (palette defaults apply)", vp.color === null && vp.sizeKey === null && vp.glow === null && vp.weight === null && vp.bounce === null);
         check("13 Voice parse: first shape word wins", api.parseVoice("a cone and a cube").shape === "cone");
