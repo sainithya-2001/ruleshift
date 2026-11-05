@@ -25,6 +25,9 @@ if (script.runTests) {
     }
     function* run() {
         yield 0.3;
+        var startCount = api.count();
+        api.loadDemo(); yield 0.5;   // the demo preset is the starting set the original checks were written for
+        check("0 Default scene starts empty (demo preset off)", startCount === 0, "count " + startCount);
         var z = nodes[0].initial.z;
         // 1. Activate -> spheres move
         api.reset(); yield 0.2;
@@ -161,6 +164,69 @@ if (script.runTests) {
         check("10 Link can be created again after clear", T.connections.length === 1 && T.slots[0].active);
         T.tap(1); T.tap(2); T.tap(0); T.tap(2); yield 0.1;
         check("10 All 3 pairs linkable", T.connections.length === 3);
+
+        // 11. Create palette: spawning shapes/sizes, glow, weight, bounce, limit, delete, clear all, reset
+        var SHAPES = ["sphere", "cube", "crystal", "cone", "torus"], SIZES = { S: 7, M: 10, L: 14 };
+        api.clearAll(); yield 0.2;
+        check("11 Clear all empties the world", api.count() === 0 && nodes.length === 0 && T.slots.length === 0 && conns.length === 0 && api.getState() === "creation");
+        for (var si = 0; si < SHAPES.length; si++) {
+            for (var sk in SIZES) {
+                var idx = api.spawn({ shape: SHAPES[si], sizeKey: sk, color: [1, 0, 0.35] });
+                yield 0.12;
+                var nn = nodes[idx];
+                var okMesh = !!nn && nn.fullMesh && nn.fullMesh.aabbMax.x - nn.fullMesh.aabbMin.x > 0.2 && nn.parts.length >= 1;
+                check("11 Spawn " + SHAPES[si] + " " + sk + ": mesh, radius " + (SIZES[sk] / 2), okMesh && Math.abs(nn.radius - SIZES[sk] / 2) < 0.01 && Math.abs(nn.tr.getLocalScale().x - SIZES[sk]) < 0.01, "r=" + (nn ? nn.radius : "none"));
+                check("11 Spawn " + SHAPES[si] + " " + sk + ": draggable (collider + interactable bound)", !!nn.obj.getComponent("Component.ColliderComponent") && T.pendingBinds() === 0);
+                api.clearAll(); yield 0.05;
+            }
+        }
+        // glow: layered translucent additive shells
+        var gi = api.spawn({ shape: "sphere", glow: true, color: [0, 0.85, 1] }); yield 0.1;
+        var gl = T.glowInfo(gi);
+        check("11 Glow: 2 shells, additive blend, translucent", gl.length === 2 && gl.every(function (g) { return g.blend === BlendMode.Add && g.alpha < 1; }), JSON.stringify(gl));
+        var ng = api.spawn({ shape: "cube", glow: false }); yield 0.1;
+        check("11 No glow: no shells", T.glowInfo(ng).length === 0);
+        api.clearAll(); yield 0.1;
+        // limit
+        for (var li = 0; li < 8; li++) { api.spawn({ shape: "cube", sizeKey: "S" }); }
+        var over = api.spawn({ shape: "cube", sizeKey: "S" });
+        check("11 Limit: 8 objects max, 9th refused", api.count() === 8 && over === -1, "count " + api.count());
+        var okOverlap = true;
+        for (var a1 = 0; a1 < nodes.length; a1++) { for (var b1 = a1 + 1; b1 < nodes.length; b1++) { if (nodes[a1].pos.distance(nodes[b1].pos) < nodes[a1].radius + nodes[b1].radius - 0.05) { okOverlap = false; } } }
+        check("11 Spawned objects do not overlap each other", okOverlap);
+        api.clearAll(); yield 0.1;
+        // weight: light object is moved further than the heavy one by the same link force
+        var wl = api.spawn({ shape: "sphere", weight: "light", pos: new vec3(-12, 0, -95) }), wh = api.spawn({ shape: "sphere", weight: "heavy", pos: new vec3(12, 0, -95) });
+        T.connect(wl, wh, "ATTRACT"); api.activate(); yield 0.6;
+        var dl = nodes[wl].pos.distance(nodes[wl].initial), dh = nodes[wh].pos.distance(nodes[wh].initial);
+        check("11 Weight: light moves further than heavy", dl > dh * 1.5, "light " + dl.toFixed(2) + " heavy " + dh.toFixed(2));
+        api.clearAll(); yield 0.1;
+        // bounce: high bounce reverses at the wall, low bounce does not
+        var bh = api.spawn({ shape: "sphere", bounce: "high", pos: new vec3(T.box.x - 2, -5, -95) }), bl = api.spawn({ shape: "sphere", bounce: "low", pos: new vec3(T.box.x - 2, 5, -95) });
+        api.activate(); yield 0.05;
+        nodes[bh].vel = new vec3(30, 0, 0); nodes[bl].vel = new vec3(30, 0, 0); yield 0.35;
+        check("11 Bounce: high bounces off the wall, low does not", nodes[bh].vel.x < -1 && nodes[bl].vel.x > -0.5, "high " + nodes[bh].vel.x.toFixed(1) + " low " + nodes[bl].vel.x.toFixed(1));
+        api.clearAll(); yield 0.1;
+        // delete removes the object and its links
+        var d0 = api.spawn({ shape: "cube", pos: new vec3(-12, 0, -95) }), d1 = api.spawn({ shape: "cone", pos: new vec3(0, 6, -95) }), d2 = api.spawn({ shape: "torus", pos: new vec3(12, 0, -95) });
+        var del = nodes[d1];
+        T.connect(d0, d1, "ATTRACT"); T.connect(d1, d2, "REPEL"); T.connect(d0, d2, "ATTRACT"); yield 0.1;
+        check("11 Delete setup: 3 links", conns.length === 3);
+        T.tap(d1); yield 0.05;
+        var info = api.selectedInfo();
+        check("11 Selecting an object exposes its position (for the Delete button)", !!info && Math.abs(info.x - del.pos.x) < 0.01);
+        var okDel = api.deleteSelected(); yield 0.1;
+        check("11 Delete removes object and its links", okDel && api.count() === 2 && conns.length === 1 && T.slots.every(function (c) { return c.A !== del && c.B !== del; }) && api.selectedInfo() === null, "nodes " + api.count() + " links " + conns.length);
+        var fr2 = T.frames(); api.activate(); yield 0.5;
+        check("11 Sim runs after delete", T.frames() - fr2 >= 2);
+        api.reset(); yield 0.1;
+        // reset keeps created objects, restores their positions
+        var r0 = nodes[0].initial;
+        nodes[0].pos = new vec3(r0.x + 5, r0.y + 3, r0.z); nodes[0].tr.setLocalPosition(nodes[0].pos);
+        api.reset(); yield 0.2;
+        check("11 Reset keeps created objects and restores positions", api.count() === 2 && nodes[0].pos.distance(nodes[0].initial) < 0.001 && conns.length === 1);
+        api.clearAll(); yield 0.1;
+        check("11 Clear all after creating removes everything", api.count() === 0 && T.slots.length === 0);
 
         api.reset();
         var pass = results.filter(function (r) { return r; }).length;

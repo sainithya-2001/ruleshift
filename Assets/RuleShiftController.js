@@ -1,18 +1,12 @@
-// @input SceneObject nodeA
-// @input SceneObject nodeB
-// @input SceneObject nodeC
-// @input SceneObject connAB
-// @input SceneObject connBC
-// @input SceneObject connAC
-// @input Component.ScriptComponent interactableAB
-// @input Component.ScriptComponent interactableBC
-// @input Component.ScriptComponent interactableAC
+// @input SceneObject nodeTemplate
+// @input SceneObject linkTemplate
 // @input float strength = 0.8
 // @input bool debugAutoToggle = false
+// @input bool demoPreset = false
 
-// RULESHIFT system: N nodes + list of connections {nodeA,nodeB,rule,visual}.
-// Each frame every connection adds a force to both of its nodes; forces are
-// summed per node, then integrated. Rules can be changed at any time.
+// RULESHIFT system: a dynamic set of nodes (max MAX_NODES) + links {A,B,rule,visual}.
+// Nodes are spawned from the Create palette (or the demo preset). Each frame every active link adds a force to
+// both of its nodes; forces are summed per node, scaled by the node's weight, then integrated. Rules change live.
 var RULES = { ATTRACT: "ATTRACT", REPEL: "REPEL", COLLISION_TRIGGER: "COLLISION_TRIGGER" };
 var RULE_ORDER = [RULES.ATTRACT, RULES.REPEL, RULES.COLLISION_TRIGGER];
 var RULE_COLOR = {
@@ -20,68 +14,228 @@ var RULE_COLOR = {
     REPEL: new vec4(0.2, 0.6, 1.0, 1),      // cool
     COLLISION_TRIGGER: new vec4(0.8, 0.3, 1.0, 1) // violet
 };
-
 var NODE_COLORS = [new vec4(1.0, 0.0, 0.35, 1), new vec4(0.0, 0.85, 1.0, 1), new vec4(1.0, 0.9, 0.0, 1)]; // hot pink, electric cyan, vivid yellow
-var nodes = [];      // {obj, tr, pos:vec3, vel:vec3, force:vec3, initial:vec3}
-var slots = [];       // all 3 possible links (AB, BC, AC); only active ones are in `connections`
-var connections = []; // {a, b, rule, visual, baseScaleY, baseDist}
+var MAX_NODES = 8;
+var WORLD_Z = -95;
+var SIZES = { S: 7, M: 10, L: 14 };            // node scale in cm (diameter of the bounding sphere)
+var WEIGHTS = { light: 1.6, heavy: 0.5 };      // multiplies how strongly forces move the node
+var BOUNCES = { low: 0, high: 0.85 };          // restitution on collisions and walls
 
-function meshRadius(obj) {
-    var r = obj.getComponent("Component.RenderMeshVisual");
-    var s = obj.getTransform().getWorldScale();
-    if (r && r.mesh) { return (r.mesh.aabbMax.x - r.mesh.aabbMin.x) / 2 * s.x; }
-    return s.x / 2;
+var nodes = [];      // {obj, tr, pos, vel, force, initial, radius, baseScale, pulse, dragging, color, rmv, accel, rest, shape}
+var slots = [];      // every link object ever made for a pair; only `active` ones are in `connections`
+var connections = [];
+
+var NODE_TMPL = script.nodeTemplate, LINK_TMPL = script.linkTemplate;
+var LINK_RMV0 = LINK_TMPL.getComponent("Component.RenderMeshVisual");
+var LINK_MESH = LINK_RMV0.mesh, LINK_MAT = LINK_RMV0.mainMaterial;
+var SPHERE_MAT = LINK_MAT;       // flat baseColor material (PBR washed colours to pastel)
+var SPHERE_MESH = NODE_TMPL.getComponent("Component.RenderMeshVisual").mesh;
+NODE_TMPL.enabled = false; LINK_TMPL.enabled = false;
+
+function lerp4(a, b, t) { return new vec4(a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t, 1); }
+function setNodeColor(n, col) { n.parts.forEach(function (p) { p.rmv.mainPass.baseColor = new vec4(col.r * p.shade, col.g * p.shade, col.b * p.shade, 1); }); }
+function nodeIndex(n) { return nodes.indexOf(n); }
+
+// ---------- procedural meshes (unit size: every shape fits in a +-0.5 cube) ----------
+var meshCache = {};
+function cross(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+function sub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
+function dot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+function norm(a) { var l = Math.sqrt(dot(a, a)) || 1; return [a[0] / l, a[1] / l, a[2] / l]; }
+// Adds one flat-shaded triangle, wound counter-clockwise as seen from outside (ref = a point inside the solid).
+function tri(tris, a, b, c, ref) {
+    var n = cross(sub(b, a), sub(c, a));
+    var g = [(a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3, (a[2] + b[2] + c[2]) / 3];
+    if (dot(n, sub(g, ref || [0, 0, 0])) < 0) { var t = b; b = c; c = t; }
+    tris.push([a, b, c]);
 }
-var USE_EMISSIVE = false;   // PBR white base texture washed colours to pastel; use the flat baseColor material instead
-var SPHERE_MAT = script.connAB.getComponent("Component.RenderMeshVisual").mainMaterial;
-function setNodeColor(rmv, col) {   // PBR sphere mat has no colour param; Port_Emissive_N006 is the tintable one
-    if (USE_EMISSIVE) { rmv.mainPass.Port_Emissive_N006 = new vec3(col.r, col.g, col.b); }
-    else { rmv.mainPass.baseColor = col; }
+function buildMesh(tris) {
+    var mb = new MeshBuilder([{ name: "position", components: 3 }, { name: "normal", components: 3, normalized: true }, { name: "texture0", components: 2 }]);
+    mb.topology = MeshTopology.Triangles; mb.indexType = MeshIndexType.UInt16;
+    var verts = [], idx = [], uv = [[0, 0], [1, 0], [0, 1]];
+    tris.forEach(function (t) {
+        var n = norm(cross(sub(t[1], t[0]), sub(t[2], t[0])));
+        for (var k = 0; k < 3; k++) { verts.push(t[k][0], t[k][1], t[k][2], n[0], n[1], n[2], uv[k][0], uv[k][1]); idx.push(idx.length); }
+    });
+    mb.appendVerticesInterleaved(verts); mb.appendIndices(idx); mb.updateMesh();
+    return mb.getMesh();
 }
-function addNode(obj) {
-    if (!obj) { return -1; }
-    var nrmv = obj.getComponent("Component.RenderMeshVisual");
-    var col = NODE_COLORS[nodes.length % NODE_COLORS.length];
-    if (nrmv) { nrmv.mainMaterial = SPHERE_MAT.clone(); setNodeColor(nrmv, col); }
-    var tr = obj.getTransform();
-    var p = tr.getLocalPosition();
-    nodes.push({ obj: obj, tr: tr, pos: new vec3(p.x, p.y, p.z), vel: vec3.zero(),
-        force: vec3.zero(), initial: new vec3(p.x, p.y, p.z), radius: meshRadius(obj),
-        baseScale: obj.getTransform().getLocalScale(), pulse: -1, dragging: false, color: col, rmv: nrmv });
-    return nodes.length - 1;
+function shapeTris(shape) {
+    var T = [], i, h = 0.5;
+    if (shape === "cube") {
+        var P = [];
+        for (i = 0; i < 8; i++) { P.push([(i & 1) ? h : -h, (i & 2) ? h : -h, (i & 4) ? h : -h]); }
+        [[0, 1, 3, 2], [4, 5, 7, 6], [0, 1, 5, 4], [2, 3, 7, 6], [0, 2, 6, 4], [1, 3, 7, 5]].forEach(function (q) {
+            tri(T, P[q[0]], P[q[1]], P[q[2]]); tri(T, P[q[0]], P[q[2]], P[q[3]]);
+        });
+    } else if (shape === "cone") {
+        var N = 20, ring = [];
+        for (i = 0; i < N; i++) { var a = i / N * Math.PI * 2; ring.push([Math.cos(a) * h, -h, Math.sin(a) * h]); }
+        for (i = 0; i < N; i++) { tri(T, [0, h, 0], ring[i], ring[(i + 1) % N]); tri(T, [0, -h, 0], ring[i], ring[(i + 1) % N]); }
+    } else if (shape === "crystal") {
+        var S = 6, up = [], lo = [];
+        for (i = 0; i < S; i++) { var b = i / S * Math.PI * 2 + 0.3; up.push([Math.cos(b) * 0.3, 0.17, Math.sin(b) * 0.3]); lo.push([Math.cos(b) * 0.3, -0.17, Math.sin(b) * 0.3]); }
+        for (i = 0; i < S; i++) {
+            var j = (i + 1) % S;
+            tri(T, [0, h, 0], up[i], up[j]); tri(T, [0, -h, 0], lo[i], lo[j]);
+            tri(T, up[i], lo[i], lo[j]); tri(T, up[i], lo[j], up[j]);
+        }
+    } else if (shape === "torus") {
+        var U = 20, V = 10, R = 0.33, r = 0.17;
+        function tp(u, v) { var cu = Math.cos(u), su = Math.sin(u); return [(R + r * Math.cos(v)) * cu, (R + r * Math.cos(v)) * su, r * Math.sin(v)]; }
+        for (i = 0; i < U; i++) {
+            for (var k = 0; k < V; k++) {
+                var u0 = i / U * Math.PI * 2, u1 = (i + 1) / U * Math.PI * 2, v0 = k / V * Math.PI * 2, v1 = (k + 1) / V * Math.PI * 2;
+                var c0 = [R * Math.cos(u0), R * Math.sin(u0), 0], c1 = [R * Math.cos(u1), R * Math.sin(u1), 0];
+                var ctr = [(c0[0] + c1[0]) / 2, (c0[1] + c1[1]) / 2, 0];
+                tri(T, tp(u0, v0), tp(u1, v0), tp(u1, v1), ctr); tri(T, tp(u0, v0), tp(u1, v1), tp(u0, v1), ctr);
+            }
+        }
+    }
+    return T;
 }
-// Depth cue: a soft white specular blob upper-left-front + a darker tinted blob lower-right, both children of the sphere.
-function addShading(n) {
-    if (!n.rmv || !n.rmv.mesh) { return; }
-    var r = (n.rmv.mesh.aabbMax.x - n.rmv.mesh.aabbMin.x) / 2;
-    function blob(name, off, sc, col) {
-        var o = global.scene.createSceneObject(name);
+// Flat material has no lighting, so faceted shapes are split into 3 brightness groups (baked light from upper-left-front)
+var LIGHT_DIR = norm([-0.4, 0.7, 0.6]), SHADES = [1.0, 0.74, 0.5];
+var bucketCache = {};
+function getShapeParts(shape) {
+    if (shape === "sphere") { return [{ mesh: SPHERE_MESH, shade: 1 }]; }
+    if (!bucketCache[shape]) {
+        var groups = [[], [], []];
+        shapeTris(shape).forEach(function (t) {
+            var nrm = norm(cross(sub(t[1], t[0]), sub(t[2], t[0])));
+            var d = dot(nrm, LIGHT_DIR);
+            groups[d > 0.45 ? 0 : (d > -0.1 ? 1 : 2)].push(t);
+        });
+        bucketCache[shape] = [];
+        groups.forEach(function (g, k) { if (g.length) { bucketCache[shape].push({ mesh: buildMesh(g), shade: SHADES[k] }); } });
+    }
+    return bucketCache[shape];
+}
+function getShapeMesh(shape) {
+    if (shape === "sphere") { return SPHERE_MESH; }
+    if (!meshCache[shape]) { meshCache[shape] = buildMesh(shapeTris(shape)); }
+    return meshCache[shape];
+}
+
+// ---------- copying scene templates ----------
+function cloneTemplate(tmpl, name) {
+    var o = tmpl.copyWholeHierarchy(tmpl);
+    o.setParent(tmpl.getParent());
+    o.name = name; o.enabled = true;
+    return o;
+}
+var pendingBinds = [];   // SIK events are bound once the clone's Interactable has initialised (next frames)
+
+// ---------- nodes ----------
+function toColor(c) {
+    if (!c) { return NODE_COLORS[nodes.length % NODE_COLORS.length]; }
+    if (c.r !== undefined) { return c; }
+    return new vec4(c[0], c[1], c[2], 1);
+}
+function findFreeSpot(radius) {
+    var best = new vec3(0, -2, WORLD_Z);
+    for (var k = 0; k < 60; k++) {
+        var ang = k * 2.39996, rad = k === 0 ? 0 : 3 + k * 0.45;
+        var p = new vec3(Math.cos(ang) * rad * 1.1, -2 + Math.sin(ang) * rad * 0.7, WORLD_Z);
+        p = new vec3(Math.max(-BOX_X + radius, Math.min(BOX_X - radius, p.x)), Math.max(BOX_YMIN + radius, Math.min(BOX_YMAX - radius, p.y)), WORLD_Z);
+        var free = nodes.every(function (n) { return n.pos.distance(p) >= n.radius + radius + 0.5; });
+        if (free) { return p; }
+        best = p;
+    }
+    return best;
+}
+function addGlow(n, size) {
+    // two layered translucent additive shells around the object read as a soft halo on an additive display
+    n.glow = [];
+    [[1.3, 0.55], [1.7, 0.28]].forEach(function (L, li) {
+        var o = global.scene.createSceneObject("Glow " + li);
         o.setParent(n.obj); o.layer = n.obj.layer;
         var v = o.createComponent("Component.RenderMeshVisual");
-        v.mesh = n.rmv.mesh; v.mainMaterial = SPHERE_MAT.clone(); v.mainPass.baseColor = col;
-        o.getTransform().setLocalScale(vec3.one().uniformScale(sc));
-        o.getTransform().setLocalPosition(off.uniformScale(r));
-    }
-    blob("Shine", new vec3(-0.38, 0.42, 0.62), 0.3, lerp4(n.color, new vec4(1, 1, 1, 1), 0.7));
+        v.mesh = n.fullMesh; v.mainMaterial = SPHERE_MAT.clone();
+        var p = v.mainPass;
+        p.blendMode = BlendMode.Add; p.depthWrite = false;
+        p.baseColor = new vec4(n.color.r * L[1], n.color.g * L[1], n.color.b * L[1], L[1]);
+        v.setRenderOrder(5 + li);
+        o.getTransform().setLocalScale(vec3.one().uniformScale(L[0]));
+        n.glow.push(o);
+    });
 }
+function addShine(n) {   // soft specular blob for depth on spheres
+    var r = (n.rmv.mesh.aabbMax.x - n.rmv.mesh.aabbMin.x) / 2;
+    var o = global.scene.createSceneObject("Shine");
+    o.setParent(n.obj); o.layer = n.obj.layer;
+    var v = o.createComponent("Component.RenderMeshVisual");
+    v.mesh = n.rmv.mesh; v.mainMaterial = SPHERE_MAT.clone(); v.mainPass.baseColor = lerp4(n.color, new vec4(1, 1, 1, 1), 0.7);
+    o.getTransform().setLocalScale(vec3.one().uniformScale(0.3));
+    o.getTransform().setLocalPosition(new vec3(-0.38, 0.42, 0.62).uniformScale(r));
+}
+// opts: {shape, color, glow, size (cm), sizeKey, weight, bounce, accel, rest, pos, name, shine}
+function spawnNode(opts) {
+    opts = opts || {};
+    if (nodes.length >= MAX_NODES) { print("RULESHIFT limit reached (" + MAX_NODES + ")"); return null; }
+    var shape = opts.shape || "sphere";
+    var size = opts.size || SIZES[opts.sizeKey || "M"];
+    var col = toColor(opts.color);
+    var obj = cloneTemplate(NODE_TMPL, opts.name || (shape + " " + (nodes.length + 1)));
+    var rmv = obj.getComponent("Component.RenderMeshVisual");
+    var parts = getShapeParts(shape);
+    rmv.mesh = parts[0].mesh; rmv.mainMaterial = SPHERE_MAT.clone();
+    var partList = [{ rmv: rmv, shade: parts[0].shade }];
+    for (var pk = 1; pk < parts.length; pk++) {
+        var po = global.scene.createSceneObject("Shade " + pk);
+        po.setParent(obj); po.layer = obj.layer;
+        var pv = po.createComponent("Component.RenderMeshVisual");
+        pv.mesh = parts[pk].mesh; pv.mainMaterial = SPHERE_MAT.clone();
+        partList.push({ rmv: pv, shade: parts[pk].shade });
+    }
+    var tr = obj.getTransform();
+    var scale = vec3.one().uniformScale(size);
+    tr.setLocalScale(scale);
+    var radius = size * 0.5;
+    var p = opts.pos ? new vec3(opts.pos.x, opts.pos.y, opts.pos.z === undefined ? WORLD_Z : opts.pos.z) : findFreeSpot(radius);
+    tr.setLocalPosition(p);
+    var col2 = obj.getComponent("Component.ColliderComponent");
+    if (col2 && col2.shape && col2.shape.radius !== undefined) { var sh = col2.shape; sh.radius = 0.5; col2.shape = sh; }
+    var n = { obj: obj, tr: tr, pos: new vec3(p.x, p.y, p.z), vel: vec3.zero(), force: vec3.zero(), initial: new vec3(p.x, p.y, p.z),
+        radius: radius, baseScale: scale, pulse: -1, dragging: false, color: col, rmv: rmv, parts: partList, fullMesh: getShapeMesh(shape), shape: shape, size: size,
+        accel: opts.accel !== undefined ? opts.accel : (WEIGHTS[opts.weight] || 1),
+        rest: opts.rest !== undefined ? opts.rest : (BOUNCES[opts.bounce] || 0), glowOn: !!opts.glow, glow: [] };
+    setNodeColor(n, col);
+    nodes.push(n);
+    if (shape === "sphere" && opts.shine !== false) { addShine(n); }
+    if (opts.glow) { addGlow(n); }
+    pendingBinds.push({ kind: "node", n: n });
+    print("RULESHIFT spawned " + obj.name + " (" + nodes.length + "/" + MAX_NODES + ")");
+    return n;
+}
+function deleteNode(n) {
+    var i = nodeIndex(n);
+    if (i < 0) { return false; }
+    for (var k = slots.length - 1; k >= 0; k--) {
+        if (slots[k].A === n || slots[k].B === n) { destroySlot(slots[k]); }
+    }
+    var nm = n.obj.name;
+    if (selNode === n) { selNode = null; }
+    nodes.splice(i, 1);
+    n.obj.destroy();
+    refreshConnections();
+    print("RULESHIFT deleted " + nm + " (" + nodes.length + " left)");
+    return true;
+}
+
+// ---------- links ----------
 var HALO_SCALE = 1.7;
-function applyColor(c) {
-    if (c.rmv && c.rmv.mainPass) {
-        c.rmv.mainPass.baseColor = RULE_COLOR[c.rule];
-        if (c.haloRmv) { var k = RULE_COLOR[c.rule]; c.haloRmv.mainPass.baseColor = new vec4(k.r * 0.35, k.g * 0.35, k.b * 0.35, 0.35); }
-    }
-}
-function addConnection(a, b, rule, visual) {
-    if (a < 0 || b < 0 || !visual) { return null; }
-    var d = Math.max(nodes[a].pos.sub(nodes[b].pos).length, 0.1);
-    var c = { a: a, b: b, rule: rule, visual: visual, rmv: visual.getComponent("Component.RenderMeshVisual"),
-        cooldownUntil: 0, baseScaleY: visual.getTransform().getLocalScale().y, baseDist: d };
+function applyColor(c) { if (c.rmv && c.rmv.mainPass) { c.rmv.mainPass.baseColor = RULE_COLOR[c.rule]; } }
+function makeSlot(A, B) {
+    var visual = cloneTemplate(LINK_TMPL, "Link " + A.obj.name + "-" + B.obj.name);
+    var d = Math.max(A.pos.sub(B.pos).length, 0.1);
+    var c = { A: A, B: B, rule: RULES.ATTRACT, visual: visual, rmv: visual.getComponent("Component.RenderMeshVisual"),
+        cooldownUntil: 0, baseDist: d };
     // Parent keeps unit scale + the (invisible) collider; a child object carries the thin visible mesh.
     var pmesh = c.rmv.mesh, pmat = c.rmv.mainMaterial;
     c.rmv.enabled = false;
     var vo = global.scene.createSceneObject("Link Visual");
-    vo.setParent(visual);
-    vo.layer = visual.layer;
+    vo.setParent(visual); vo.layer = visual.layer;
     c.rmv = vo.createComponent("Component.RenderMeshVisual");
     c.rmv.mesh = pmesh; c.rmv.mainMaterial = pmat.clone();
     c.visTr = vo.getTransform();
@@ -90,11 +244,8 @@ function addConnection(a, b, rule, visual) {
     c.mCenter = new vec3((mx.x + mn.x) / 2, (mx.y + mn.y) / 2, (mx.z + mn.z) / 2);
     visual.getTransform().setLocalScale(vec3.one());
     c.collider = visual.getComponent("Component.ColliderComponent");
-    c.thickDiam = nodes[a].radius * 0.5;   // visible cylinder diameter = half the sphere radius (radius R/4)
-    c.pop = -1;
-    c.active = false;
-    slots.push(c);
-    var lo = global.scene.createSceneObject("Rule Label " + slots.length);
+    c.pop = -1; c.active = false;
+    var lo = global.scene.createSceneObject("Rule Label");
     c.labelObj = lo;
     c.label = lo.createComponent("Component.Text");
     c.label.size = 110; c.label.depthTest = false; c.label.renderOrder = 100;
@@ -105,17 +256,16 @@ function addConnection(a, b, rule, visual) {
     c.labelTr = lo.getTransform();
     applyColor(c);
     visual.enabled = false; lo.enabled = false;   // hidden until the link is created
+    slots.push(c);
+    pendingBinds.push({ kind: "link", c: c });
     return c;
 }
-
-var iA = addNode(script.nodeA);
-var iB = addNode(script.nodeB);
-var iC = addNode(script.nodeC);
-nodes.forEach(addShading);
-addConnection(iA, iB, RULES.ATTRACT, script.connAB);
-addConnection(iB, iC, RULES.REPEL, script.connBC);
-addConnection(iA, iC, RULES.ATTRACT, script.connAC);
-
+function destroySlot(c) {
+    var i = slots.indexOf(c);
+    if (i >= 0) { slots.splice(i, 1); }
+    c.active = false;
+    c.visual.destroy(); c.labelObj.destroy();
+}
 function refreshConnections() {
     connections.length = 0;
     slots.forEach(function (c) { if (c.active) { connections.push(c); } });
@@ -125,71 +275,67 @@ function activateLink(c, rule, quiet) {
     c.visual.enabled = true; c.labelObj.enabled = true;
     applyColor(c);
     refreshConnections();
-    if (!quiet) { c.pop = 0; print("RULESHIFT link created " + nodes[c.a].obj.name + "-" + nodes[c.b].obj.name + " (" + rule + ")"); }
+    if (!quiet) { c.pop = 0; print("RULESHIFT link created " + c.A.obj.name + "-" + c.B.obj.name + " (" + rule + ")"); }
 }
-function slotFor(i, j) {
+function slotFor(A, B, create) {
     for (var k = 0; k < slots.length; k++) {
         var c = slots[k];
-        if ((c.a === i && c.b === j) || (c.a === j && c.b === i)) { return c; }
+        if ((c.A === A && c.B === B) || (c.A === B && c.B === A)) { return c; }
     }
-    return null;
+    return create ? makeSlot(A, B) : null;
 }
-activateLink(slots[0], RULES.ATTRACT, true);
-activateLink(slots[1], RULES.REPEL, true);
 
-// Tap-to-link: tap one sphere to select it, tap a second to link them (one link per pair); tap the same sphere to cancel.
-var selected = -1;
-function handleTap(i) {
-    if (selected < 0) { selected = i; print("RULESHIFT selected " + nodes[i].obj.name); return; }
-    if (selected === i) { selected = -1; print("RULESHIFT selection cancelled"); return; }
-    var c = slotFor(selected, i);
-    if (c && !c.active) { activateLink(c, RULES.ATTRACT, false); }
-    else if (c) { print("RULESHIFT already linked"); }
-    selected = -1;
+// Tap-to-link: tap one object to select it, tap a second to link them (one link per pair); tap the same object to cancel.
+var selNode = null;
+function handleTapNode(n) {
+    if (!selNode) { selNode = n; print("RULESHIFT selected " + n.obj.name); return; }
+    if (selNode === n) { selNode = null; print("RULESHIFT selection cancelled"); return; }
+    var c = slotFor(selNode, n, true);
+    if (!c.active) { activateLink(c, RULES.ATTRACT, false); }
+    else { print("RULESHIFT already linked"); }
+    selNode = null;
 }
-function pressStart(i) { var n = nodes[i]; n.dragging = true; n.tapT = elapsed; n.tapP = n.tr.getLocalPosition(); }
-function pressEnd(i, allowTap) {
-    var n = nodes[i];
+function pressStartNode(n) { n.dragging = true; n.tapT = elapsed; n.tapP = n.tr.getLocalPosition(); }
+function pressEndNode(n, allowTap) {
+    if (nodeIndex(n) < 0) { return; }
     n.dragging = false; var p = n.tr.getLocalPosition(); n.pos = new vec3(p.x, p.y, p.z); n.vel = vec3.zero();
     // only a short press that barely moved counts as a tap-select; drags never do
-    if (allowTap && elapsed - n.tapT < 0.35 && p.distance(n.tapP) < 1.5) { handleTap(i); }
+    if (allowTap && elapsed - n.tapT < 0.35 && p.distance(n.tapP) < 1.5) { handleTapNode(n); }
 }
 function clearLinks() {
     slots.forEach(function (c) { c.active = false; c.visual.enabled = false; c.labelObj.enabled = false; });
     refreshConnections();
-    selected = -1;
+    selNode = null;
     print("RULESHIFT links cleared");
 }
 function updateSelection() {
-    nodes.forEach(function (n, i) {
+    nodes.forEach(function (n) {
         if (n.pulse >= 0) { return; }
-        if (i === selected) {
+        if (n === selNode) {
             var k = 0.5 + 0.5 * Math.sin(elapsed * 8);
-            setNodeColor(n.rmv, lerp4(n.color, new vec4(1, 1, 1, 1), 0.55));
+            setNodeColor(n, lerp4(n.color, new vec4(1, 1, 1, 1), 0.55));
             n.tr.setLocalScale(n.baseScale.uniformScale(1.1 + 0.1 * k));
             n.selShown = true;
         } else if (n.selShown) {
-            setNodeColor(n.rmv, n.color); n.tr.setLocalScale(n.baseScale); n.selShown = false;
+            setNodeColor(n, n.color); n.tr.setLocalScale(n.baseScale); n.selShown = false;
         }
     });
 }
 
-function cycleRule(c, why) {
-    setRule(c, RULE_ORDER[(RULE_ORDER.indexOf(c.rule) + 1) % RULE_ORDER.length], why);
-}
+function cycleRule(c, why) { setRule(c, RULE_ORDER[(RULE_ORDER.indexOf(c.rule) + 1) % RULE_ORDER.length], why); }
 function setRule(c, rule, why) {
     c.rule = rule;
     c.pop = 0;
     applyColor(c);
-    print("RULESHIFT " + nodes[c.a].obj.name + "-" + nodes[c.b].obj.name + " rule -> " + rule + " (" + why + ")");
+    print("RULESHIFT " + c.A.obj.name + "-" + c.B.obj.name + " rule -> " + rule + " (" + why + ")");
 }
 
 var LINK_GAP = 6;  // visible link length when attracted
-var REST_ATTRACT_UNUSED = 6, REPEL_RANGE = 40, BOUND = 45, DAMPING = 3.0, MAX_SPEED = 40;
+var REPEL_RANGE = 40, DAMPING = 3.0, MAX_SPEED = 40;
 function computeForces() {
     nodes.forEach(function (n) { n.force = vec3.zero(); });
     connections.forEach(function (c) {
-        var A = nodes[c.a], B = nodes[c.b];
+        var A = c.A, B = c.B;
         var delta = B.pos.sub(A.pos);
         var dist = Math.max(delta.length, 0.01);
         var dir = delta.uniformScale(1 / dist);   // A -> B
@@ -209,22 +355,19 @@ function computeForces() {
 var TOUCH_COOLDOWN = 1.0, PULSE_TIME = 0.5, PULSE_AMOUNT = 0.9;
 function flip(rule) { return rule === RULES.ATTRACT ? RULES.REPEL : (rule === RULES.REPEL ? RULES.ATTRACT : rule); }
 function checkCollisions() {
-    connections.forEach(function (c) {
+    connections.slice().forEach(function (c) {
         if (c.rule !== RULES.COLLISION_TRIGGER || elapsed < c.cooldownUntil) { return; }
-        var A = nodes[c.a], B = nodes[c.b];
+        var A = c.A, B = c.B;
         if (A.pos.distance(B.pos) > A.radius + B.radius + 0.1) { return; }
         c.cooldownUntil = elapsed + TOUCH_COOLDOWN;
         A.pulse = 0; B.pulse = 0;
         print("RULESHIFT COLLISION " + A.obj.name + "-" + B.obj.name);
         connections.forEach(function (o) {
             if (o === c || o.rule === RULES.COLLISION_TRIGGER) { return; }
-            if (o.a === c.a || o.a === c.b || o.b === c.a || o.b === c.b) {
-                setRule(o, flip(o.rule), "collision");
-            }
+            if (o.A === A || o.A === B || o.B === A || o.B === B) { setRule(o, flip(o.rule), "collision"); }
         });
     });
 }
-function lerp4(a, b, t) { return new vec4(a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t, 1); }
 function updatePulses(dt) {
     nodes.forEach(function (n) {
         if (n.pulse < 0) { return; }
@@ -232,24 +375,26 @@ function updatePulses(dt) {
         var k = n.pulse >= PULSE_TIME ? 0 : Math.sin(Math.PI * n.pulse / PULSE_TIME);
         if (n.pulse >= PULSE_TIME) { n.pulse = -1; }
         n.tr.setLocalScale(n.baseScale.uniformScale(1 + PULSE_AMOUNT * k));
-        if (n.rmv) { setNodeColor(n.rmv, lerp4(n.color, new vec4(1, 1, 1, 1), k)); }
+        setNodeColor(n, lerp4(n.color, new vec4(1, 1, 1, 1), k));
     });
 }
 
 function integrate(dt) {
     nodes.forEach(function (n) {
         if (n.dragging) { return; }
-        // soft bounds keep everything inside the view
-        n.vel = n.vel.add(n.force.uniformScale(dt)).uniformScale(Math.max(0, 1 - DAMPING * dt));
+        n.vel = n.vel.add(n.force.uniformScale(dt * n.accel)).uniformScale(Math.max(0, 1 - DAMPING * dt));
         var sp = n.vel.length;
         if (sp > MAX_SPEED) { n.vel = n.vel.uniformScale(MAX_SPEED / sp); }
         var p = n.pos.add(n.vel.uniformScale(dt));
-        n.pos = clampToBox(n, p);
-        n.tr.setLocalPosition(p);
+        var q = clampToBox(n, p);
+        if (n.rest > 0) {   // bouncy walls: reflect the velocity component that hit the wall
+            n.vel = new vec3(q.x !== p.x ? -n.vel.x * n.rest : n.vel.x, q.y !== p.y ? -n.vel.y * n.rest : n.vel.y, q.z !== p.z ? -n.vel.z * n.rest : n.vel.z);
+        }
+        n.pos = q;
+        n.tr.setLocalPosition(q);
     });
 }
-
-function syncDragged() {   // a grabbed sphere owns its position; physics resumes from wherever it is released
+function syncDragged() {   // a grabbed object owns its position; physics resumes from wherever it is released
     nodes.forEach(function (n) {
         if (!n.dragging) { return; }
         n.pos = clampToBox(n, n.tr.getLocalPosition()); n.vel = vec3.zero(); n.force = vec3.zero();
@@ -257,13 +402,14 @@ function syncDragged() {   // a grabbed sphere owns its position; physics resume
     });
 }
 
-// ---- Guided challenge panel ----
+// ---------- Guided challenge panel (shown only for the demo preset) ----------
+var goalEnabled = false;
 var goalStage = 0;   // 0: touch goal, 1: celebrating goal 1, 2: triangle goal, 3: all done
 var goalTimer = 0, goalPulse = -1, settleTime = 0;
-var GOAL_1 = "Make the yellow sphere touch the pink one\n\u2014 without dragging it.";
+var GOAL_1 = "Make the yellow sphere touch the pink one\n— without dragging it.";
 var GOAL_2 = "Get all three spheres to settle in a triangle.";
 var GOAL_2_TWO = "Get all three spheres to\nsettle in a triangle.";
-var goalTr, goalText, nextText;
+var goalTr, goalText, nextText, goalObj, nextObj;
 function makeText(name, size, pos, col) {
     var o = global.scene.createSceneObject(name);
     var t = o.createComponent("Component.Text");
@@ -275,19 +421,19 @@ function makeText(name, size, pos, col) {
     return { obj: o, text: t, tr: o.getTransform() };
 }
 (function () {
-    var top = -1e9, z = 0;
-    nodes.forEach(function (n) { top = Math.max(top, n.initial.y); z += n.initial.z / nodes.length; });
-    var parent = nodes[0].obj.getParent();
-    var base = parent ? parent.getTransform().getWorldPosition().y : 0;
-    var g = makeText("Goal Text", 100, new vec3(0, top + base + 22, z), new vec4(1, 1, 1, 1));
-    var nx = makeText("Next Text", 62, new vec3(0, top + base + 16.5, z), new vec4(0.75, 0.9, 1, 0.9));
-    goalTr = g.tr; goalText = g.text; nextText = nx.text;
-    goalText.text = GOAL_1;
-    nextText.text = "Next: " + GOAL_2;
+    var g = makeText("Goal Text", 100, new vec3(0, 26, WORLD_Z), new vec4(1, 1, 1, 1));
+    var nx = makeText("Next Text", 62, new vec3(0, 20.5, WORLD_Z), new vec4(0.75, 0.9, 1, 0.9));
+    goalTr = g.tr; goalText = g.text; nextText = nx.text; goalObj = g.obj; nextObj = nx.obj;
+    goalObj.enabled = false; nextObj.enabled = false;
 })();
+function setGoalEnabled(on) {
+    goalEnabled = on; goalStage = 0; settleTime = 0;
+    goalObj.enabled = on; nextObj.enabled = on;
+    goalText.text = GOAL_1; nextText.text = "Next: " + GOAL_2;
+}
 function startGoalPulse() { goalPulse = 0; }
 function isTriangle() {
-    var p = nodes.map(function (n) { return n.pos; });
+    var p = nodes.slice(0, 3).map(function (n) { return n.pos; });
     var d = [p[0].distance(p[1]), p[1].distance(p[2]), p[0].distance(p[2])];
     var mean = (d[0] + d[1] + d[2]) / 3;
     var minD = Math.min(d[0], d[1], d[2]), maxD = Math.max(d[0], d[1], d[2]);
@@ -296,6 +442,7 @@ function isTriangle() {
     return minD > minGap && maxD < mean * 1.5 && maxD < (d[0] + d[1] + d[2] - maxD) * 0.9;
 }
 function updateGoal(dt) {
+    if (!goalEnabled || nodes.length < 3) { return; }
     if (goalPulse >= 0) {
         goalPulse += dt;
         var k = goalPulse >= 0.6 ? 0 : Math.sin(Math.PI * goalPulse / 0.6);
@@ -305,7 +452,7 @@ function updateGoal(dt) {
     if (goalStage === 0) {
         if (state === "live" && !nodes[2].dragging && nodes[2].pos.distance(nodes[0].pos) <= nodes[2].radius + nodes[0].radius + 0.1) {
             goalStage = 1; goalTimer = 0; startGoalPulse();
-            goalText.text = "Rule rewritten! \u2728";
+            goalText.text = "Rule rewritten! ✨";
             print("RULESHIFT goal 1 complete");
         }
     } else if (goalStage === 1) {
@@ -314,17 +461,17 @@ function updateGoal(dt) {
     } else if (goalStage === 2) {
         var still = nodes.every(function (n) { return n.vel.length < 1.5 && !n.dragging; });
         settleTime = (state === "live" && still && isTriangle()) ? settleTime + dt : 0;
-        if (settleTime > 1.5) { goalStage = 3; startGoalPulse(); goalText.text = "Triangle! Rule rewritten! \u2728"; print("RULESHIFT goal 2 complete"); }
+        if (settleTime > 1.5) { goalStage = 3; startGoalPulse(); goalText.text = "Triangle! Rule rewritten! ✨"; print("RULESHIFT goal 2 complete"); }
     }
 }
-var BOX_X = 19, BOX_YMIN = -11, BOX_YMAX = 10, BOX_Z = 10;   // keeps spheres above the buttons and inside the view
+var BOX_X = 19, BOX_YMIN = -11, BOX_YMAX = 10, BOX_Z = 10;   // keeps objects above the buttons and inside the view
 function clampToBox(n, p) {
     return new vec3(Math.max(-BOX_X, Math.min(BOX_X, p.x)),
         Math.max(BOX_YMIN, Math.min(BOX_YMAX, p.y)),
         Math.max(n.initial.z - BOX_Z, Math.min(n.initial.z + BOX_Z, p.z)));
-}   // keeps spheres and labels below the challenge panel
-// Soft collision: any overlapping pair is pushed apart to exactly touching. A grabbed sphere is never pushed.
-function resolveOverlaps(moveDragged) {   // moveDragged: last resort when the other sphere is wall-pinned
+}
+// Soft collision: any overlapping pair is pushed apart to exactly touching. A grabbed object is never pushed.
+function resolveOverlaps(moveDragged) {   // moveDragged: last resort when the other object is wall-pinned
     for (var i = 0; i < nodes.length; i++) {
         for (var j = i + 1; j < nodes.length; j++) {
             var A = nodes[i], B = nodes[j];
@@ -334,10 +481,15 @@ function resolveOverlaps(moveDragged) {   // moveDragged: last resort when the o
             var pen = minD - dist;
             var dA = A.dragging && !moveDragged, dB = B.dragging && !moveDragged;
             var wA = dA ? 0 : (dB ? 1 : 0.5), wB = dB ? 0 : (dA ? 1 : 0.5);
-            if (moveDragged && A.dragging !== B.dragging) { wA = A.dragging ? 1 : 0; wB = B.dragging ? 1 : 0; }   // other sphere is pinned: grabbed one yields
+            if (moveDragged && A.dragging !== B.dragging) { wA = A.dragging ? 1 : 0; wB = B.dragging ? 1 : 0; }   // other is pinned: grabbed one yields
             A.pos = A.pos.sub(dir.uniformScale(pen * wA)); B.pos = B.pos.add(dir.uniformScale(pen * wB));
             if (wA > 0) { A.tr.setLocalPosition(A.pos); }
             if (wB > 0) { B.tr.setLocalPosition(B.pos); }
+            var e = Math.max(A.rest, B.rest);   // bounce: reflect the approach speed along the contact normal
+            if (e > 0 && !A.dragging && !B.dragging) {
+                var vrel = B.vel.sub(A.vel).dot(dir);
+                if (vrel < 0) { var jn = -(1 + e) * vrel / 2; A.vel = A.vel.sub(dir.uniformScale(jn)); B.vel = B.vel.add(dir.uniformScale(jn)); }
+            }
         }
     }
 }
@@ -346,10 +498,10 @@ var POP_TIME = 0.4, lastDt = 0.016;
 var LABEL_TEXT = { ATTRACT: "ATTRACT", REPEL: "REPEL", COLLISION_TRIGGER: "ON COLLISION" };
 var labelAlpha = 1;   // labels stay fully opaque in every mode
 function updateLabel(c) {
-    var A = nodes[c.a].pos, B = nodes[c.b].pos;
+    var A = c.A.pos, B = c.B.pos;
     var mid = A.add(B).uniformScale(0.5);
     var toCam = mid.uniformScale(-1 / Math.max(mid.length, 0.01));   // camera is at the origin
-    var cx = (nodes[0].pos.x + nodes[1].pos.x + nodes[2].pos.x) / 3;   // side links push their labels outward so 3 labels don't pile up
+    var cx = 0; nodes.forEach(function (n) { cx += n.pos.x / nodes.length; });   // side links push their labels outward so labels don't pile up
     var dx = Math.max(-1, Math.min(1, (mid.x - cx) / 6)) * 6.5;
     c.labelTr.setWorldPosition(mid.add(toCam.uniformScale(22)).add(new vec3(dx, 7, 0)));
     c.label.text = LABEL_TEXT[c.rule];
@@ -357,7 +509,7 @@ function updateLabel(c) {
     c.label.textFill.color = new vec4(k.r, k.g, k.b, labelAlpha);
 }
 function updateVisual(c) {
-    var A = nodes[c.a].pos, B = nodes[c.b].pos;
+    var A = c.A.pos, B = c.B.pos;
     var delta = B.sub(A);
     var dist = Math.max(delta.length, 0.01);
     var dir = delta.uniformScale(1 / dist);
@@ -366,13 +518,13 @@ function updateVisual(c) {
     tr.setLocalRotation(quat.rotationFromTo(UP, dir));
     var pk = 0;
     if (c.pop >= 0) { c.pop += lastDt; pk = c.pop >= POP_TIME ? 0 : Math.sin(Math.PI * c.pop / POP_TIME); if (c.pop >= POP_TIME) { c.pop = -1; } }
-    var w = c.thickDiam * (1 + 1.2 * pk);
+    var w = Math.min(c.A.radius, c.B.radius) * 0.5 * (1 + 1.2 * pk);   // visible cylinder diameter = quarter of the smaller radius*2
     var sx = w / c.mW, sy = dist / c.mL, sz = w / c.mD;
     c.visTr.setLocalScale(new vec3(sx, sy, sz));
     c.visTr.setLocalPosition(new vec3(-c.mCenter.x * sx, -c.mCenter.y * sy, -c.mCenter.z * sz));
-    if (c.collider) {   // wide invisible tap target, shorter than the span so spheres stay grabbable
+    if (c.collider) {   // wide invisible tap target, shorter than the span so objects stay grabbable
         var sh = c.collider.shape;
-        sh.size = new vec3(6, Math.max(dist - nodes[c.a].radius - nodes[c.b].radius, 1), 6);
+        sh.size = new vec3(6, Math.max(dist - c.A.radius - c.B.radius, 1), 6);
         c.collider.shape = sh;
     }
 }
@@ -385,17 +537,35 @@ function setState(st) {
     print("RULESHIFT state -> " + st);
     stateListeners.forEach(function (f) { f(st); });
 }
-function resetWorld() {
+function resetWorld() {   // restores positions; created objects and links are kept
     nodes.forEach(function (n) {
         n.pos = new vec3(n.initial.x, n.initial.y, n.initial.z);
         n.vel = vec3.zero(); n.force = vec3.zero(); n.pulse = -1; n.dragging = false;
         n.tr.setLocalPosition(n.pos); n.tr.setLocalScale(n.baseScale);
     });
     connections.forEach(function (c) { c.cooldownUntil = 0; updateVisual(c); });
-    selected = -1;   // links (including user-created ones) are kept
-    goalStage = 0; settleTime = 0; goalText.text = GOAL_1; nextText.text = "Next: " + GOAL_2;
+    selNode = null;
+    if (goalEnabled) { goalStage = 0; settleTime = 0; goalText.text = GOAL_1; nextText.text = "Next: " + GOAL_2; }
     setState("creation");
 }
+function clearAll() {
+    for (var k = slots.length - 1; k >= 0; k--) { destroySlot(slots[k]); }
+    for (var i = nodes.length - 1; i >= 0; i--) { nodes[i].obj.destroy(); }
+    nodes.length = 0; refreshConnections();
+    selNode = null; setGoalEnabled(false);
+    setState("creation");
+    print("RULESHIFT cleared all");
+}
+function loadDemo() {   // the starting set used for the video: pink, cyan, yellow spheres; pink-cyan attract, cyan-yellow repel
+    clearAll();
+    var a = spawnNode({ shape: "sphere", color: NODE_COLORS[0], size: 10, accel: 1, rest: 0, pos: new vec3(-12, -11, WORLD_Z), name: "Sphere A" });
+    var b = spawnNode({ shape: "sphere", color: NODE_COLORS[1], size: 10, accel: 1, rest: 0, pos: new vec3(12, -11, WORLD_Z), name: "Sphere B" });
+    var c = spawnNode({ shape: "sphere", color: NODE_COLORS[2], size: 10, accel: 1, rest: 0, pos: new vec3(0, 4, WORLD_Z), name: "Sphere C" });
+    var ab = slotFor(a, b, true), bc = slotFor(b, c, true); slotFor(a, c, true);   // slot order AB, BC, AC
+    activateLink(ab, RULES.ATTRACT, true); activateLink(bc, RULES.REPEL, true);
+    setGoalEnabled(true);
+}
+
 script.api.getState = function () { return state; };
 script.api.onState = function (f) { stateListeners.push(f); f(state); };
 script.api.activate = function () { if (state === "creation") { setState("live"); } };
@@ -406,14 +576,54 @@ script.api.toggle = function () {   // Activate -> Pause -> Resume -> Pause ...
 };
 script.api.reset = resetWorld;
 script.api.clearLinks = clearLinks;
+script.api.clearAll = clearAll;
+script.api.loadDemo = loadDemo;
+script.api.spawn = function (opts) { var n = spawnNode(opts); return n ? nodeIndex(n) : -1; };
+script.api.count = function () { return nodes.length; };
+script.api.maxNodes = MAX_NODES;
+script.api.deleteSelected = function () { return selNode ? deleteNode(selNode) : false; };
+script.api.selectedInfo = function () {
+    if (!selNode) { return null; }
+    return { x: selNode.pos.x, y: selNode.pos.y, z: selNode.pos.z, r: selNode.radius };
+};
+// UI helpers for the palette (TypeScript side): an opaque plate and a round colour swatch, built from the shared meshes.
+script.api.makePlate = function (name, w, h, d, pos, col) {
+    var o = global.scene.createSceneObject(name);
+    var v = o.createComponent("Component.RenderMeshVisual");
+    v.mesh = LINK_MESH; v.mainMaterial = SPHERE_MAT.clone(); v.mainPass.baseColor = col;
+    var mn = LINK_MESH.aabbMin, mx = LINK_MESH.aabbMax;
+    var mw = Math.max(mx.x - mn.x, 0.0001), ml = Math.max(mx.y - mn.y, 0.0001), md = Math.max(mx.z - mn.z, 0.0001);
+    var t = o.getTransform();
+    t.setWorldRotation(quat.fromEulerAngles(0, 0, Math.PI / 2));   // mesh long axis is Y; lay it along X
+    t.setWorldScale(new vec3(h / mw, w / ml, d / md));
+    t.setWorldPosition(pos);
+    return o;
+};
+script.api.makeSwatch = function (parent, col, size, z) {
+    var o = global.scene.createSceneObject("Swatch");
+    o.setParent(parent);
+    var v = o.createComponent("Component.RenderMeshVisual");
+    v.mesh = SPHERE_MESH; v.mainMaterial = SPHERE_MAT.clone(); v.mainPass.baseColor = new vec4(col[0], col[1], col[2], 1);
+    o.getTransform().setLocalScale(new vec3(size, size, size * 0.2));
+    o.getTransform().setLocalPosition(new vec3(0, 0, z));
+    return o;
+};
 var frameCount = 0;
 script.api.test = {   // read/write hooks for RuleShiftTests.js
-    nodes: nodes, connections: connections, slots: slots, tap: handleTap, pressStart: pressStart, pressEnd: pressEnd, clearLinks: clearLinks, selected: function () { return selected; }, setRule: setRule, cycleRule: cycleRule,
+    nodes: nodes, connections: connections, slots: slots,
+    tap: function (i) { handleTapNode(nodes[i]); },
+    pressStart: function (i) { pressStartNode(nodes[i]); },
+    pressEnd: function (i, allowTap) { pressEndNode(nodes[i], allowTap); },
+    clearLinks: clearLinks, selected: function () { return selNode ? nodeIndex(selNode) : -1; }, setRule: setRule, cycleRule: cycleRule,
+    pendingBinds: function () { return pendingBinds.length; },
+    deleteNode: function (i) { return deleteNode(nodes[i]); },
     box: { x: BOX_X, yMin: BOX_YMIN, yMax: BOX_YMAX, zr: BOX_Z, buttonTop: -16 },
     goalStage: function () { return goalStage; },
     frames: function () { return frameCount; },
     linkColor: function (c) { var k = c.rmv.mainPass.baseColor; return k.r.toFixed(2) + "," + k.g.toFixed(2) + "," + k.b.toFixed(2); },
-    place: function (i, v) { var n = nodes[i]; n.pos = new vec3(v.x, v.y, v.z); n.vel = vec3.zero(); n.tr.setLocalPosition(n.pos); }
+    place: function (i, v) { var n = nodes[i]; n.pos = new vec3(v.x, v.y, v.z); n.vel = vec3.zero(); n.tr.setLocalPosition(n.pos); },
+    connect: function (i, j, rule) { var c = slotFor(nodes[i], nodes[j], true); if (!c.active) { activateLink(c, rule || RULES.ATTRACT, true); } return c; },
+    glowInfo: function (i) { var n = nodes[i]; return n.glow.map(function (o) { var p = o.getComponent("Component.RenderMeshVisual").mainPass; return { blend: p.blendMode, alpha: p.baseColor.a }; }); }
 };
 
 var elapsed = 0, lastToggle = 0;
@@ -422,10 +632,28 @@ script.createEvent("UpdateEvent").bind(function (e) {
     frameCount++;
     lastDt = dt;
     elapsed += e.getDeltaTime();
+    // bind SIK events on clones once their Interactable has initialised
+    for (var pi = pendingBinds.length - 1; pi >= 0; pi--) {
+        var pb = pendingBinds[pi], done = false, obj = pb.kind === "node" ? pb.n.obj : pb.c.visual;
+        if (pb.kind === "node" ? nodeIndex(pb.n) < 0 : slots.indexOf(pb.c) < 0) { pendingBinds.splice(pi, 1); continue; }
+        obj.getComponents("Component.ScriptComponent").forEach(function (sc) {
+            if (done || !(sc.onTriggerStart && sc.onTriggerEnd)) { return; }
+            done = true;
+            if (pb.kind === "node") {
+                var n = pb.n;
+                sc.onTriggerStart.add(function () { pressStartNode(n); });
+                sc.onTriggerEnd.add(function () { pressEndNode(n, true); });
+                if (sc.onTriggerCanceled) { sc.onTriggerCanceled.add(function () { pressEndNode(n, false); }); }
+            } else {
+                var c = pb.c;
+                sc.onTriggerStart.add(function () { if (c.active) { cycleRule(c, "tap"); } });
+            }
+        });
+        if (done) { pendingBinds.splice(pi, 1); }
+    }
     if (state === "live" && script.debugAutoToggle && elapsed - lastToggle >= 3 && connections.length) {
         lastToggle = elapsed;
-        var c0 = connections[0];
-        cycleRule(c0, "auto");
+        cycleRule(connections[0], "auto");
     }
     syncDragged();
     if (state === "live") {
@@ -443,46 +671,23 @@ script.createEvent("UpdateEvent").bind(function (e) {
     connections.forEach(updateLabel);
     connections.forEach(updateVisual);
 });
-
-// SIK hand-interaction events must be subscribed during OnStartEvent.
 script.createEvent("OnStartEvent").bind(function () {
-    nodes.forEach(function (n, ni) {
-        n.obj.getComponents("Component.ScriptComponent").forEach(function (sc) {
-            if (sc.onTriggerStart && sc.onTriggerEnd) {
-                sc.onTriggerStart.add(function () { pressStart(ni); });
-                sc.onTriggerEnd.add(function () { pressEnd(ni, true); });
-                if (sc.onTriggerCanceled) { sc.onTriggerCanceled.add(function () { pressEnd(ni, false); }); }
-            }
-        });
-        // collider matches the visible sphere
-        var col = n.obj.getComponent("Component.ColliderComponent");
-        if (col && col.shape && col.shape.radius !== undefined) {
-            var sh = col.shape; sh.radius = (n.rmv.mesh.aabbMax.x - n.rmv.mesh.aabbMin.x) / 2; col.shape = sh;
-        }
-    });
-    [script.interactableAB, script.interactableBC, script.interactableAC].forEach(function (inter, i) {
-        var c = slots[i];
-        if (inter && inter.onTriggerStart && c) {
-            inter.onTriggerStart.add(function () { if (c.active) { cycleRule(c, "tap"); } });
-        } else {
-            print("RULESHIFT: assign Interactable for connection " + i);
-        }
-    });
+    if (script.demoPreset) { loadDemo(); }
 });
-var WORLD_Z = -95, CTRL_Y = -22;
+
+var CTRL_Y = -22;
 // Opaque violet backing so the button labels read on any background.
 try {
     var plate = global.scene.createSceneObject("Controls Backing");
     var prmv = plate.createComponent("Component.RenderMeshVisual");
-    prmv.mesh = slots[0].rmv.mesh; prmv.mainMaterial = SPHERE_MAT.clone();
+    prmv.mesh = LINK_MESH; prmv.mainMaterial = SPHERE_MAT.clone();
     prmv.mainPass.baseColor = new vec4(0.3, 0.12, 0.6, 1);
     var pt = plate.getTransform();
-    var bw = 54, bh = 17, bd = 0.4, mc = slots[0];
-    pt.setWorldScale(new vec3(bw / mc.mW, bh / mc.mL, bd / mc.mD));
+    var bw = 54, bh = 17, bd = 0.4;
+    var mnb = LINK_MESH.aabbMin, mxb = LINK_MESH.aabbMax;
+    var mW0 = Math.max(mxb.x - mnb.x, 0.0001), mL0 = Math.max(mxb.y - mnb.y, 0.0001), mD0 = Math.max(mxb.z - mnb.z, 0.0001);
+    pt.setWorldScale(new vec3(bw / mW0, bh / mL0, bd / mD0));
     pt.setWorldRotation(quat.fromEulerAngles(0, 0, Math.PI / 2));   // mesh long axis is Y; lay it along X
-    pt.setWorldScale(new vec3(bh / mc.mW, bw / mc.mL, bd / mc.mD));
+    pt.setWorldScale(new vec3(bh / mW0, bw / mL0, bd / mD0));
     pt.setWorldPosition(new vec3(0, CTRL_Y - 2.5, WORLD_Z - 1));
 } catch (err) { print("RULESHIFT backing failed: " + err); }
-
-
-

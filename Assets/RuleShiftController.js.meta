@@ -28,16 +28,10 @@
   ExportUid: 00000000-0000-0000-0000-000000000000
   PackagePolicy: CanBeUnpacked
   ScriptInputsHidden:
-    connAB: false
-    connAC: false
-    connBC: false
     debugAutoToggle: false
-    interactableAB: false
-    interactableAC: false
-    interactableBC: false
-    nodeA: false
-    nodeB: false
-    nodeC: false
+    demoPreset: false
+    linkTemplate: false
+    nodeTemplate: false
     strength: false
   ScriptTypesHidden:
     {}
@@ -48,17 +42,11 @@
   Attachments:
     []
   DefaultScriptInputs:
-    - nodeA: !<reference.SceneObject> 00000000-0000-0000-0000-000000000000
-      nodeB: !<reference.SceneObject> 00000000-0000-0000-0000-000000000000
-      nodeC: !<reference.SceneObject> 00000000-0000-0000-0000-000000000000
-      connAB: !<reference.SceneObject> 00000000-0000-0000-0000-000000000000
-      connBC: !<reference.SceneObject> 00000000-0000-0000-0000-000000000000
-      connAC: !<reference.SceneObject> 00000000-0000-0000-0000-000000000000
-      interactableAB: !<reference.ScriptComponent> 00000000-0000-0000-0000-000000000000
-      interactableBC: !<reference.ScriptComponent> 00000000-0000-0000-0000-000000000000
-      interactableAC: !<reference.ScriptComponent> 00000000-0000-0000-0000-000000000000
+    - nodeTemplate: !<reference.SceneObject> 00000000-0000-0000-0000-000000000000
+      linkTemplate: !<reference.SceneObject> 00000000-0000-0000-0000-000000000000
       strength: 0.800000
       debugAutoToggle: true
+      demoPreset: false
   ScriptTypes:
     -
       {}
