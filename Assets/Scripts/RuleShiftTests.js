@@ -114,6 +114,54 @@ if (script.runTests) {
         yield 3;
         check("9 Challenge 2 triangle triggers", T.goalStage() === 3, "stage " + T.goalStage());
 
+        // 10. User-created links
+        api.reset(); yield 0.2;
+        check("10 Start: AB + BC linked, AC not", T.connections.length === 2 && !T.slots[2].active);
+        T.tap(0); yield 0.1;
+        check("10 Tap selects a sphere", T.selected() === 0);
+        T.tap(2); yield 0.1;
+        check("10 Second tap creates AC link (ATTRACT)", T.connections.length === 3 && T.slots[2].active && T.slots[2].rule === "ATTRACT" && T.selected() === -1, "links " + T.connections.length);
+        check("10 New link has visual, collider, label", T.slots[2].visual.enabled && !!T.slots[2].collider && T.slots[2].labelObj.enabled && T.slots[2].label.text.length > 0);
+        T.tap(2); T.tap(0); yield 0.1;
+        check("10 No duplicate link (AC again)", T.connections.length === 3);
+        T.tap(0); T.tap(1); yield 0.1;
+        check("10 No duplicate link (existing AB)", T.connections.length === 3 && T.selected() === -1);
+        T.tap(1); yield 0.05; T.tap(1); yield 0.1;
+        check("10 Tapping same sphere cancels selection", T.selected() === -1 && T.connections.length === 3);
+        // drag must not select
+        T.pressStart(0); T.nodes[0].tr.setLocalPosition(new vec3(T.nodes[0].pos.x + 6, T.nodes[0].pos.y, z)); yield 0.1; T.pressEnd(0, true); yield 0.1;
+        check("10 Dragging a sphere does not select it", T.selected() === -1);
+        T.pressStart(1); yield 0.6; T.pressEnd(1, true); yield 0.1;
+        check("10 Long press does not select", T.selected() === -1);
+        T.pressStart(1); yield 0.1; T.pressEnd(1, true); yield 0.1;
+        check("10 Short tap selects", T.selected() === 1);
+        T.tap(1); yield 0.1;
+        // new link physics + rule cycling
+        api.reset(); yield 0.2;
+        T.setRule(conns[0], "COLLISION_TRIGGER", "test"); T.setRule(conns[1], "COLLISION_TRIGGER", "test"); T.setRule(T.slots[2], "ATTRACT", "test");
+        api.activate(); yield 0.1;
+        T.place(0, new vec3(-16, 0, z)); T.place(2, new vec3(16, 0, z)); T.place(1, new vec3(0, -10, z));
+        var d0 = nodes[0].pos.distance(nodes[2].pos); yield 2;
+        var d1 = nodes[0].pos.distance(nodes[2].pos);
+        check("10 New link physics: ATTRACT pulls A and C together", d1 < d0 - 3, d0.toFixed(1) + " -> " + d1.toFixed(1));
+        T.setRule(T.slots[2], "REPEL", "test"); yield 3;
+        var d2 = nodes[0].pos.distance(nodes[2].pos);
+        check("10 New link physics: REPEL pushes them apart", d2 > d1 + 1, d1.toFixed(1) + " -> " + d2.toFixed(1));
+        var rc = T.slots[2].rule; T.cycleRule(T.slots[2], "test"); yield 0.1;
+        check("10 New link rule cycles", T.slots[2].rule !== rc);
+        api.reset(); yield 0.2;
+        check("10 Reset keeps user-created link", T.connections.length === 3 && T.slots[2].active);
+        // Clear links
+        T.clearLinks(); yield 0.2;
+        check("10 Clear links removes all links", T.connections.length === 0 && T.slots.every(function (c) { return !c.active && !c.visual.enabled && !c.labelObj.enabled; }));
+        var fr = T.frames(); api.activate(); yield 0.6;
+        check("10 Sim runs fine with no links", T.frames() - fr >= 2 && api.getState() === "live");
+        api.reset(); yield 0.2;
+        T.tap(0); T.tap(1); yield 0.1;
+        check("10 Link can be created again after clear", T.connections.length === 1 && T.slots[0].active);
+        T.tap(1); T.tap(2); T.tap(0); T.tap(2); yield 0.1;
+        check("10 All 3 pairs linkable", T.connections.length === 3);
+
         api.reset();
         var pass = results.filter(function (r) { return r; }).length;
         print("RULESHIFT TEST SUMMARY: " + pass + "/" + results.length + " PASS" + (pass === results.length ? " - ALL PASS" : " - FAILURES"));

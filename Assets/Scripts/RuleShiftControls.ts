@@ -21,8 +21,11 @@ export class RuleShiftControls extends BaseScriptComponent {
   onAwake() {
     const w = this.buttonSize.x
     const x = (w + this.gap) / 2
-    const main = this.makeButton("ActivateButton", "Activate", -x)
-    const reset = this.makeButton("ResetButton", "Reset", x)
+    const rowSize = new vec2(w, this.buttonSize.y - 1)
+    const main = this.makeButton("ActivateButton", "Activate", -x, 1, rowSize, 110)
+    const reset = this.makeButton("ResetButton", "Reset", x, 1, rowSize, 110)
+    const clear = this.makeButton("ClearLinksButton", "Clear links", 0, -6.5, new vec2(18, 5.5), 80)
+    clear.button.onTriggerUp.add(() => this.controller.api.clearLinks())
     this.mainContent = main.content
     main.button.onTriggerUp.add(() => this.controller.api.toggle())
     reset.button.onTriggerUp.add(() => this.controller.api.reset())
@@ -38,16 +41,16 @@ export class RuleShiftControls extends BaseScriptComponent {
     this.mainContent.text = st === "live" ? "Pause" : st === "paused" ? "Resume" : "Activate"
   }
 
-  private makeButton(name: string, label: string, x: number) {
+  private makeButton(name: string, label: string, x: number, y: number, size: vec2, textSize: number) {
     const so = global.scene.createSceneObject(name)
     so.setParent(this.sceneObject)
-    so.getTransform().setLocalPosition(new vec3(x, 0, 1.5))
+    so.getTransform().setLocalPosition(new vec3(x, y, 1.5))
     const button = so.createComponent(Button.getTypeName()) as Button
     const content = so.createComponent(ElementContent.getTypeName()) as ElementContent
     content.text = label
-    content.textSize = 110
+    content.textSize = textSize
     button.onInitialized.add(() => {
-      button.size = new vec3(this.buttonSize.x, this.buttonSize.y, 1)
+      button.size = new vec3(size.x, size.y, 1)
     })
     return {button, content}
   }

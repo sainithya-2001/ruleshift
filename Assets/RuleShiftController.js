@@ -3,8 +3,10 @@
 // @input SceneObject nodeC
 // @input SceneObject connAB
 // @input SceneObject connBC
+// @input SceneObject connAC
 // @input Component.ScriptComponent interactableAB
 // @input Component.ScriptComponent interactableBC
+// @input Component.ScriptComponent interactableAC
 // @input float strength = 0.8
 // @input bool debugAutoToggle = false
 
@@ -21,6 +23,7 @@ var RULE_COLOR = {
 
 var NODE_COLORS = [new vec4(1.0, 0.0, 0.35, 1), new vec4(0.0, 0.85, 1.0, 1), new vec4(1.0, 0.9, 0.0, 1)]; // hot pink, electric cyan, vivid yellow
 var nodes = [];      // {obj, tr, pos:vec3, vel:vec3, force:vec3, initial:vec3}
+var slots = [];       // all 3 possible links (AB, BC, AC); only active ones are in `connections`
 var connections = []; // {a, b, rule, visual, baseScaleY, baseDist}
 
 function meshRadius(obj) {
@@ -89,8 +92,10 @@ function addConnection(a, b, rule, visual) {
     c.collider = visual.getComponent("Component.ColliderComponent");
     c.thickDiam = nodes[a].radius * 0.5;   // visible cylinder diameter = half the sphere radius (radius R/4)
     c.pop = -1;
-    connections.push(c);
-    var lo = global.scene.createSceneObject("Rule Label " + connections.length);
+    c.active = false;
+    slots.push(c);
+    var lo = global.scene.createSceneObject("Rule Label " + slots.length);
+    c.labelObj = lo;
     c.label = lo.createComponent("Component.Text");
     c.label.size = 110; c.label.depthTest = false; c.label.renderOrder = 100;
     c.label.outlineSettings.enabled = true; c.label.outlineSettings.size = 0.6;
@@ -99,6 +104,7 @@ function addConnection(a, b, rule, visual) {
     c.label.verticalAlignment = VerticalAlignment.Center;
     c.labelTr = lo.getTransform();
     applyColor(c);
+    visual.enabled = false; lo.enabled = false;   // hidden until the link is created
     return c;
 }
 
@@ -108,6 +114,65 @@ var iC = addNode(script.nodeC);
 nodes.forEach(addShading);
 addConnection(iA, iB, RULES.ATTRACT, script.connAB);
 addConnection(iB, iC, RULES.REPEL, script.connBC);
+addConnection(iA, iC, RULES.ATTRACT, script.connAC);
+
+function refreshConnections() {
+    connections.length = 0;
+    slots.forEach(function (c) { if (c.active) { connections.push(c); } });
+}
+function activateLink(c, rule, quiet) {
+    c.active = true; c.rule = rule; c.cooldownUntil = 0;
+    c.visual.enabled = true; c.labelObj.enabled = true;
+    applyColor(c);
+    refreshConnections();
+    if (!quiet) { c.pop = 0; print("RULESHIFT link created " + nodes[c.a].obj.name + "-" + nodes[c.b].obj.name + " (" + rule + ")"); }
+}
+function slotFor(i, j) {
+    for (var k = 0; k < slots.length; k++) {
+        var c = slots[k];
+        if ((c.a === i && c.b === j) || (c.a === j && c.b === i)) { return c; }
+    }
+    return null;
+}
+activateLink(slots[0], RULES.ATTRACT, true);
+activateLink(slots[1], RULES.REPEL, true);
+
+// Tap-to-link: tap one sphere to select it, tap a second to link them (one link per pair); tap the same sphere to cancel.
+var selected = -1;
+function handleTap(i) {
+    if (selected < 0) { selected = i; print("RULESHIFT selected " + nodes[i].obj.name); return; }
+    if (selected === i) { selected = -1; print("RULESHIFT selection cancelled"); return; }
+    var c = slotFor(selected, i);
+    if (c && !c.active) { activateLink(c, RULES.ATTRACT, false); }
+    else if (c) { print("RULESHIFT already linked"); }
+    selected = -1;
+}
+function pressStart(i) { var n = nodes[i]; n.dragging = true; n.tapT = elapsed; n.tapP = n.tr.getLocalPosition(); }
+function pressEnd(i, allowTap) {
+    var n = nodes[i];
+    n.dragging = false; var p = n.tr.getLocalPosition(); n.pos = new vec3(p.x, p.y, p.z); n.vel = vec3.zero();
+    // only a short press that barely moved counts as a tap-select; drags never do
+    if (allowTap && elapsed - n.tapT < 0.35 && p.distance(n.tapP) < 1.5) { handleTap(i); }
+}
+function clearLinks() {
+    slots.forEach(function (c) { c.active = false; c.visual.enabled = false; c.labelObj.enabled = false; });
+    refreshConnections();
+    selected = -1;
+    print("RULESHIFT links cleared");
+}
+function updateSelection() {
+    nodes.forEach(function (n, i) {
+        if (n.pulse >= 0) { return; }
+        if (i === selected) {
+            var k = 0.5 + 0.5 * Math.sin(elapsed * 8);
+            setNodeColor(n.rmv, lerp4(n.color, new vec4(1, 1, 1, 1), 0.55));
+            n.tr.setLocalScale(n.baseScale.uniformScale(1.1 + 0.1 * k));
+            n.selShown = true;
+        } else if (n.selShown) {
+            setNodeColor(n.rmv, n.color); n.tr.setLocalScale(n.baseScale); n.selShown = false;
+        }
+    });
+}
 
 function cycleRule(c, why) {
     setRule(c, RULE_ORDER[(RULE_ORDER.indexOf(c.rule) + 1) % RULE_ORDER.length], why);
@@ -284,7 +349,9 @@ function updateLabel(c) {
     var A = nodes[c.a].pos, B = nodes[c.b].pos;
     var mid = A.add(B).uniformScale(0.5);
     var toCam = mid.uniformScale(-1 / Math.max(mid.length, 0.01));   // camera is at the origin
-    c.labelTr.setWorldPosition(mid.add(toCam.uniformScale(22)).add(new vec3(0, 7, 0)));
+    var cx = (nodes[0].pos.x + nodes[1].pos.x + nodes[2].pos.x) / 3;   // side links push their labels outward so 3 labels don't pile up
+    var dx = Math.max(-1, Math.min(1, (mid.x - cx) / 6)) * 6.5;
+    c.labelTr.setWorldPosition(mid.add(toCam.uniformScale(22)).add(new vec3(dx, 7, 0)));
     c.label.text = LABEL_TEXT[c.rule];
     var k = RULE_COLOR[c.rule];
     c.label.textFill.color = new vec4(k.r, k.g, k.b, labelAlpha);
@@ -325,6 +392,7 @@ function resetWorld() {
         n.tr.setLocalPosition(n.pos); n.tr.setLocalScale(n.baseScale);
     });
     connections.forEach(function (c) { c.cooldownUntil = 0; updateVisual(c); });
+    selected = -1;   // links (including user-created ones) are kept
     goalStage = 0; settleTime = 0; goalText.text = GOAL_1; nextText.text = "Next: " + GOAL_2;
     setState("creation");
 }
@@ -337,9 +405,10 @@ script.api.toggle = function () {   // Activate -> Pause -> Resume -> Pause ...
     if (state === "live") { script.api.pause(); } else if (state === "paused") { script.api.resume(); } else { script.api.activate(); }
 };
 script.api.reset = resetWorld;
+script.api.clearLinks = clearLinks;
 var frameCount = 0;
 script.api.test = {   // read/write hooks for RuleShiftTests.js
-    nodes: nodes, connections: connections, setRule: setRule, cycleRule: cycleRule,
+    nodes: nodes, connections: connections, slots: slots, tap: handleTap, pressStart: pressStart, pressEnd: pressEnd, clearLinks: clearLinks, selected: function () { return selected; }, setRule: setRule, cycleRule: cycleRule,
     box: { x: BOX_X, yMin: BOX_YMIN, yMax: BOX_YMAX, zr: BOX_Z, buttonTop: -16 },
     goalStage: function () { return goalStage; },
     frames: function () { return frameCount; },
@@ -369,6 +438,7 @@ script.createEvent("UpdateEvent").bind(function (e) {
     }
     if (state === "live") { checkCollisions(); }
     updatePulses(dt);
+    updateSelection();
     updateGoal(Math.min(e.getDeltaTime(), 0.25));   // real time, so goal timers don't slow down at low frame rates
     connections.forEach(updateLabel);
     connections.forEach(updateVisual);
@@ -376,13 +446,12 @@ script.createEvent("UpdateEvent").bind(function (e) {
 
 // SIK hand-interaction events must be subscribed during OnStartEvent.
 script.createEvent("OnStartEvent").bind(function () {
-    nodes.forEach(function (n) {
+    nodes.forEach(function (n, ni) {
         n.obj.getComponents("Component.ScriptComponent").forEach(function (sc) {
             if (sc.onTriggerStart && sc.onTriggerEnd) {
-                sc.onTriggerStart.add(function () { n.dragging = true; });
-                var end = function () { n.dragging = false; var p = n.tr.getLocalPosition(); n.pos = new vec3(p.x, p.y, p.z); n.vel = vec3.zero(); };
-                sc.onTriggerEnd.add(end);
-                if (sc.onTriggerCanceled) { sc.onTriggerCanceled.add(end); }
+                sc.onTriggerStart.add(function () { pressStart(ni); });
+                sc.onTriggerEnd.add(function () { pressEnd(ni, true); });
+                if (sc.onTriggerCanceled) { sc.onTriggerCanceled.add(function () { pressEnd(ni, false); }); }
             }
         });
         // collider matches the visible sphere
@@ -391,10 +460,10 @@ script.createEvent("OnStartEvent").bind(function () {
             var sh = col.shape; sh.radius = (n.rmv.mesh.aabbMax.x - n.rmv.mesh.aabbMin.x) / 2; col.shape = sh;
         }
     });
-    [script.interactableAB, script.interactableBC].forEach(function (inter, i) {
-        var c = connections[i];
+    [script.interactableAB, script.interactableBC, script.interactableAC].forEach(function (inter, i) {
+        var c = slots[i];
         if (inter && inter.onTriggerStart && c) {
-            inter.onTriggerStart.add(function () { cycleRule(c, "tap"); });
+            inter.onTriggerStart.add(function () { if (c.active) { cycleRule(c, "tap"); } });
         } else {
             print("RULESHIFT: assign Interactable for connection " + i);
         }
@@ -405,13 +474,15 @@ var WORLD_Z = -95, CTRL_Y = -22;
 try {
     var plate = global.scene.createSceneObject("Controls Backing");
     var prmv = plate.createComponent("Component.RenderMeshVisual");
-    prmv.mesh = connections[0].rmv.mesh; prmv.mainMaterial = SPHERE_MAT.clone();
+    prmv.mesh = slots[0].rmv.mesh; prmv.mainMaterial = SPHERE_MAT.clone();
     prmv.mainPass.baseColor = new vec4(0.3, 0.12, 0.6, 1);
     var pt = plate.getTransform();
-    var bw = 54, bh = 12, bd = 0.4, mc = connections[0];
+    var bw = 54, bh = 17, bd = 0.4, mc = slots[0];
     pt.setWorldScale(new vec3(bw / mc.mW, bh / mc.mL, bd / mc.mD));
     pt.setWorldRotation(quat.fromEulerAngles(0, 0, Math.PI / 2));   // mesh long axis is Y; lay it along X
     pt.setWorldScale(new vec3(bh / mc.mW, bw / mc.mL, bd / mc.mD));
-    pt.setWorldPosition(new vec3(0, CTRL_Y, WORLD_Z - 1));
+    pt.setWorldPosition(new vec3(0, CTRL_Y - 2.5, WORLD_Z - 1));
 } catch (err) { print("RULESHIFT backing failed: " + err); }
+
+
 
