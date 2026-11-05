@@ -3,7 +3,8 @@
 // @input SceneObject nodeC
 // @input SceneObject connAB
 // @input SceneObject connBC
-// @input Component.ScriptComponent interactable
+// @input Component.ScriptComponent interactableAB
+// @input Component.ScriptComponent interactableBC
 // @input float strength = 0.8
 // @input bool debugAutoToggle = false
 
@@ -11,6 +12,11 @@
 // Each frame every connection adds a force to both of its nodes; forces are
 // summed per node, then integrated. Rules can be changed at any time.
 var RULES = { ATTRACT: "ATTRACT", REPEL: "REPEL" };
+var RULE_ORDER = [RULES.ATTRACT, RULES.REPEL];
+var RULE_COLOR = {
+    ATTRACT: new vec4(1.0, 0.55, 0.15, 1),  // warm
+    REPEL: new vec4(0.2, 0.6, 1.0, 1)       // cool
+};
 
 var nodes = [];      // {obj, tr, pos:vec3, vel:vec3, force:vec3, initial:vec3}
 var connections = []; // {a, b, rule, visual, baseScaleY, baseDist}
@@ -23,12 +29,19 @@ function addNode(obj) {
         force: vec3.zero(), initial: new vec3(p.x, p.y, p.z) });
     return nodes.length - 1;
 }
+function applyColor(c) {
+    if (c.rmv && c.rmv.mainPass) {
+        c.rmv.mainPass.baseColor = RULE_COLOR[c.rule];
+    } else { print("RULESHIFT no mainPass for " + c.visual.name); }
+}
 function addConnection(a, b, rule, visual) {
     if (a < 0 || b < 0 || !visual) { return null; }
     var d = Math.max(nodes[a].pos.sub(nodes[b].pos).length, 0.1);
-    var c = { a: a, b: b, rule: rule, visual: visual,
+    var c = { a: a, b: b, rule: rule, visual: visual, rmv: visual.getComponent("Component.RenderMeshVisual"),
         baseScaleY: visual.getTransform().getLocalScale().y, baseDist: d };
+    if (c.rmv) { c.rmv.mainMaterial = c.rmv.mainMaterial.clone(); }
     connections.push(c);
+    applyColor(c);
     return c;
 }
 
@@ -38,8 +51,12 @@ var iC = addNode(script.nodeC);
 addConnection(iA, iB, RULES.ATTRACT, script.connAB);
 addConnection(iB, iC, RULES.REPEL, script.connBC);
 
+function cycleRule(c, why) {
+    setRule(c, RULE_ORDER[(RULE_ORDER.indexOf(c.rule) + 1) % RULE_ORDER.length], why);
+}
 function setRule(c, rule, why) {
     c.rule = rule;
+    applyColor(c);
     print("RULESHIFT " + nodes[c.a].obj.name + "-" + nodes[c.b].obj.name + " rule -> " + rule + " (" + why + ")");
 }
 
@@ -98,7 +115,7 @@ script.createEvent("UpdateEvent").bind(function (e) {
     if (script.debugAutoToggle && elapsed - lastToggle >= 3 && connections.length) {
         lastToggle = elapsed;
         var c0 = connections[0];
-        setRule(c0, c0.rule === RULES.ATTRACT ? RULES.REPEL : RULES.ATTRACT, "auto");
+        cycleRule(c0, "auto");
     }
     computeForces();
     integrate(dt);
@@ -114,13 +131,13 @@ script.createEvent("UpdateEvent").bind(function (e) {
 
 // SIK hand-interaction events must be subscribed during OnStartEvent.
 script.createEvent("OnStartEvent").bind(function () {
-    if (script.interactable && script.interactable.onTriggerStart && connections.length) {
-        script.interactable.onTriggerStart.add(function () {
-            var c = connections[0];
-            setRule(c, c.rule === RULES.ATTRACT ? RULES.REPEL : RULES.ATTRACT, "pinch");
-        });
-    } else {
-        print("RULESHIFT: assign the SIK Interactable component in the Inspector.");
-    }
+    [script.interactableAB, script.interactableBC].forEach(function (inter, i) {
+        var c = connections[i];
+        if (inter && inter.onTriggerStart && c) {
+            inter.onTriggerStart.add(function () { cycleRule(c, "tap"); });
+        } else {
+            print("RULESHIFT: assign Interactable for connection " + i);
+        }
+    });
 });
 print("RULESHIFT system: " + nodes.length + " nodes, " + connections.length + " connections");

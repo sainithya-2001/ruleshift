@@ -1126,6 +1126,8 @@
     []
   Components:
     - !<own> 85b09e33-ecff-4449-b5bf-1f776f910a80
+    - !<own> e0191009-ec55-4acc-ae38-fe51a1993889
+    - !<own> 873b948c-b219-4bc8-b3fe-558ae7872303
 - !<ScriptComponent/4aef1a10-019c-4696-a7b1-b4bd90edb0eb>
   PrefabRemaps:
     []
@@ -1143,7 +1145,8 @@
       nodeC: !<reference.SceneObject> 68608a41-7555-4180-aa24-6a41585e6bbc
       connAB: !<reference.SceneObject> 74ee3531-c066-4408-8fe9-5257b060f267
       connBC: !<reference.SceneObject> 4a04b12b-7ef7-43f7-988b-6c806706db55
-      interactable: !<reference.ScriptComponent> 2b19e007-598c-4a1e-8550-7e2d3d8459dc
+      interactableAB: !<reference.ScriptComponent> f5c6e56e-ea67-4257-8c0d-96c0990d6fa6
+      interactableBC: !<reference.ScriptComponent> 873b948c-b219-4bc8-b3fe-558ae7872303
       strength: 0.800000
       debugAutoToggle: false
   ScriptTypes:
@@ -1192,7 +1195,7 @@
   ShadowColor: {x: 1.000000, y: 1.000000, z: 1.000000, w: 1.000000}
   ShadowDensity: 1.000000
   Materials:
-    - !<reference> e0831fa0-436b-4a44-9035-44dd570a6815
+    - !<reference> a0c8a75d-69e3-4b8a-af5a-97d6350a2daa
   Mesh: !<reference> 31500723-2790-405b-b35b-8af8c17c9130
   Skin: !<reference> 00000000-0000-0000-0000-000000000000
   BlendShapesEnabled: true
@@ -1649,6 +1652,8 @@
     []
   Components:
     - !<own> 4ef6c9ed-82af-4f4b-b108-04bbe7da26be
+    - !<own> f2556bbd-a456-44d1-943a-80484da65a0d
+    - !<own> f5c6e56e-ea67-4257-8c0d-96c0990d6fa6
 - !<RenderMeshVisual/75851d9c-278c-4830-9d7a-b8cb12fc0229>
   PrefabRemaps:
     []
@@ -1941,13 +1946,51 @@
   ShadowColor: {x: 1.000000, y: 1.000000, z: 1.000000, w: 1.000000}
   ShadowDensity: 1.000000
   Materials:
-    - !<reference> e0831fa0-436b-4a44-9035-44dd570a6815
+    - !<reference> a0c8a75d-69e3-4b8a-af5a-97d6350a2daa
   Mesh: !<reference> 31500723-2790-405b-b35b-8af8c17c9130
   Skin: !<reference> 00000000-0000-0000-0000-000000000000
   BlendShapesEnabled: true
   BlendNormals: false
   BlendShapes:
     {}
+- !<ScriptComponent/873b948c-b219-4bc8-b3fe-558ae7872303>
+  PrefabRemaps:
+    []
+  Name: Interactable
+  Enabled: true
+  ScriptAsset: !<reference> 652e631a-22d0-4941-9f74-2943df59f34c
+  ScriptInputsDefault:
+    targetingMode: true
+    targetingVisual: true
+    ignoreInteractionPlane: true
+    keepHoverOnTrigger: true
+    enableInstantDrag: true
+    isScrollable: true
+    allowMultipleInteractors: true
+    enablePokeDirectionality: true
+    acceptableXDirections: true
+    acceptableYDirections: true
+    acceptableZDirections: true
+    useFilteredPinch: true
+  ScriptTypesDefault:
+    {}
+  ScriptInputs:
+    "":
+      targetingMode: !<float> 3.000000
+      targetingVisual: !<float> 1.000000
+      ignoreInteractionPlane: false
+      keepHoverOnTrigger: false
+      enableInstantDrag: false
+      isScrollable: false
+      allowMultipleInteractors: true
+      enablePokeDirectionality: false
+      acceptableXDirections: !<float> 0.000000
+      acceptableYDirections: !<float> 0.000000
+      acceptableZDirections: !<float> 1.000000
+      useFilteredPinch: false
+  ScriptTypes:
+    "":
+      {}
 - !<SceneObject/879ce45b-bd5e-40ff-a3fe-d821523427e4>
   PrefabRemaps:
     []
@@ -2808,6 +2851,24 @@
     - !<own> d4a9c5e3-fe96-4824-9b20-59f5ad39eabd
   Components:
     []
+- !<ColliderComponent/e0191009-ec55-4acc-ae38-fe51a1993889>
+  PrefabRemaps:
+    []
+  Name: Physics Collider
+  Enabled: true
+  Shape: !<Box>
+    FitVisual: true
+    Size: {x: 15.000000, y: 15.000000, z: 15.000000}
+  Matter: !<reference> 00000000-0000-0000-0000-000000000000
+  Filter: !<reference> 00000000-0000-0000-0000-000000000000
+  OverlapFilter: !<reference> 00000000-0000-0000-0000-000000000000
+  WorldSettings: !<reference> 00000000-0000-0000-0000-000000000000
+  EnableSmoothing: false
+  PositionTension: 30.000000
+  RotationTension: 30.000000
+  ForceCompound: false
+  Intangible: false
+  ShowCollider: false
 - !<RenderMeshVisual/e1031f7e-3474-489f-a529-282f7192f812>
   PrefabRemaps:
     []
@@ -2936,6 +2997,24 @@
     []
   Components:
     []
+- !<ColliderComponent/f2556bbd-a456-44d1-943a-80484da65a0d>
+  PrefabRemaps:
+    []
+  Name: Physics Collider
+  Enabled: true
+  Shape: !<Box>
+    FitVisual: true
+    Size: {x: 15.000000, y: 15.000000, z: 15.000000}
+  Matter: !<reference> 00000000-0000-0000-0000-000000000000
+  Filter: !<reference> 00000000-0000-0000-0000-000000000000
+  OverlapFilter: !<reference> 00000000-0000-0000-0000-000000000000
+  WorldSettings: !<reference> 00000000-0000-0000-0000-000000000000
+  EnableSmoothing: false
+  PositionTension: 30.000000
+  RotationTension: 30.000000
+  ForceCompound: false
+  Intangible: false
+  ShowCollider: false
 - !<SceneObject/f36287fd-ed56-442d-ba20-78f9ef6f3502>
   PrefabRemaps:
     []
@@ -2952,6 +3031,44 @@
   Components:
     - !<own> d3e2fbc5-8795-4913-9af6-c8626f8e6d9c
     - !<own> 275aeb4d-77ac-4b1b-811e-907652542110
+- !<ScriptComponent/f5c6e56e-ea67-4257-8c0d-96c0990d6fa6>
+  PrefabRemaps:
+    []
+  Name: Interactable
+  Enabled: true
+  ScriptAsset: !<reference> 652e631a-22d0-4941-9f74-2943df59f34c
+  ScriptInputsDefault:
+    targetingMode: true
+    targetingVisual: true
+    ignoreInteractionPlane: true
+    keepHoverOnTrigger: true
+    enableInstantDrag: true
+    isScrollable: true
+    allowMultipleInteractors: true
+    enablePokeDirectionality: true
+    acceptableXDirections: true
+    acceptableYDirections: true
+    acceptableZDirections: true
+    useFilteredPinch: true
+  ScriptTypesDefault:
+    {}
+  ScriptInputs:
+    "":
+      targetingMode: !<float> 3.000000
+      targetingVisual: !<float> 1.000000
+      ignoreInteractionPlane: false
+      keepHoverOnTrigger: false
+      enableInstantDrag: false
+      isScrollable: false
+      allowMultipleInteractors: true
+      enablePokeDirectionality: false
+      acceptableXDirections: !<float> 0.000000
+      acceptableYDirections: !<float> 0.000000
+      acceptableZDirections: !<float> 1.000000
+      useFilteredPinch: false
+  ScriptTypes:
+    "":
+      {}
 - !<SceneObject/f5d74682-203a-4970-81ea-9fa7b88c96bb>
   PrefabRemaps:
     - 012a3973-9507-4230-a6ff-2b8dfd2154fe: e3ec5982-f5aa-45f3-4551-4d3a92a1f432

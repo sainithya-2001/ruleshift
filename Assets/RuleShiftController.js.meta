@@ -31,7 +31,8 @@
     connAB: false
     connBC: false
     debugAutoToggle: false
-    interactable: false
+    interactableAB: false
+    interactableBC: false
     nodeA: false
     nodeB: false
     nodeC: false
@@ -50,7 +51,8 @@
       nodeC: !<reference.SceneObject> 00000000-0000-0000-0000-000000000000
       connAB: !<reference.SceneObject> 00000000-0000-0000-0000-000000000000
       connBC: !<reference.SceneObject> 00000000-0000-0000-0000-000000000000
-      interactable: !<reference.ScriptComponent> 00000000-0000-0000-0000-000000000000
+      interactableAB: !<reference.ScriptComponent> 00000000-0000-0000-0000-000000000000
+      interactableBC: !<reference.ScriptComponent> 00000000-0000-0000-0000-000000000000
       strength: 0.800000
       debugAutoToggle: true
   ScriptTypes:
