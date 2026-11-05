@@ -1,0 +1,54 @@
+- !<AssetImportMetadata/eb55ce07-d212-49b9-998c-0090c3007352>
+  ImportedAssetIds:
+    JavaScriptAsset: !<reference> c267126f-a7b1-416b-9dc7-5cdeeb3a03e3
+  ImporterName: JavaScriptAssetImporter
+  PrimaryAsset: !<reference> c267126f-a7b1-416b-9dc7-5cdeeb3a03e3
+  PackageType: NotAPackage
+  LegacyPackagePolicy: ~
+  ExtraData:
+    {}
+  AssetDataMap:
+    JavaScriptAsset: !<own> 813373a2-5635-4776-9d8e-6c6b2e386f09
+  DependentFiles:
+    []
+  ImporterSettings: !<AssetImporterSettings>
+    {}
+  CompressionSettings: !<own> 00000000-0000-0000-0000-000000000000
+- !<ScriptAssetData/813373a2-5635-4776-9d8e-6c6b2e386f09>
+  SvgIcon: ""
+  SetupScript:
+    code: ""
+  Description: ""
+  VersionMajor: 0
+  VersionMinor: 0
+  VersionPatch: 0
+  VersionPrerelease: ""
+  UpdateOrder: 0
+  ComponentUid: c4ed2a59-0a4e-4ffe-bee9-c85b89326315
+  ExportUid: 00000000-0000-0000-0000-000000000000
+  PackagePolicy: CanBeUnpacked
+  ScriptInputsHidden:
+    connection: false
+    debugAutoToggle: false
+    interactable: false
+    nodeA: false
+    nodeB: false
+    strength: false
+  ScriptTypesHidden:
+    {}
+  ReadMe: !<reference> 00000000-0000-0000-0000-000000000000
+  DeclarationFile: !<reference> 00000000-0000-0000-0000-000000000000
+  Tags:
+    []
+  Attachments:
+    []
+  DefaultScriptInputs:
+    - nodeA: !<reference.SceneObject> 00000000-0000-0000-0000-000000000000
+      nodeB: !<reference.SceneObject> 00000000-0000-0000-0000-000000000000
+      connection: !<reference.SceneObject> 00000000-0000-0000-0000-000000000000
+      interactable: !<reference.ScriptComponent> 00000000-0000-0000-0000-000000000000
+      strength: 0.800000
+      debugAutoToggle: true
+  ScriptTypes:
+    -
+      {}
