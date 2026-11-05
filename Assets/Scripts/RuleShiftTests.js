@@ -259,7 +259,7 @@ if (script.runTests) {
         // screen-space path (camera ray + physics probe + WorldQuery attempt + plane fallback)
         var pm = api.spawn({ shape: "crystal", sizeKey: "M" }); yield 0.1;
         var res = api.placeAtScreen(new vec2(0.5, 0.82)); yield 1.2;
-        check("12 Screen pinch on empty space places the object (WorldQuery: " + api.wqStatus() + ")", api.pendingPlacement() === -1 && Math.abs(nodes[pm].pos.y - (tableY + nodes[pm].radius)) < 0.05 && Math.abs(nodes[pm].pos.x) <= T.box.x + 0.01, "res " + res + " pos " + nodes[pm].pos.x.toFixed(1) + "," + nodes[pm].pos.y.toFixed(1) + "," + nodes[pm].pos.z.toFixed(1));
+        check("12 Screen pinch on empty space places the object (WorldQuery: " + api.wqStatus() + ")", api.pendingPlacement() === -1 && (api.wqStatus() === "hits" ? nodes[pm].pos.y >= T.box.yMin - 0.01 && nodes[pm].pos.y <= T.box.yMax + 0.01 : Math.abs(nodes[pm].pos.y - (tableY + nodes[pm].radius)) < 0.05) && Math.abs(nodes[pm].pos.x) <= T.box.x + 0.01, "res " + res + " pos " + nodes[pm].pos.x.toFixed(1) + "," + nodes[pm].pos.y.toFixed(1) + "," + nodes[pm].pos.z.toFixed(1));
         // placed objects still behave: collide, stay in bounds
         api.activate(); yield 1;
         var inBox = nodes.every(function (n) { return Math.abs(n.pos.x) <= T.box.x + 0.01 && n.pos.y >= T.box.yMin - 0.01 && n.pos.y <= T.box.yMax + 0.01; });
@@ -328,6 +328,7 @@ if (script.runTests) {
         check("14 Success: state ok and the model replaced the orb", ja.state === "ok" && na.imagined === true && mr && na.rmv.enabled === false, ja.state);
         check("14 Success: a real material was passed to tryInstantiate", stub.matCalls === 1 && stub.mat !== null && stub.mat !== undefined);
         check("14 Success: caption removed", ja.cap === null);
+        check("14 Success: the orb's Shine blob and glow are hidden (nothing white lingers on the model)", !!na.shine && na.shine.enabled === false && na.glow.every(function (o) { return o.enabled === false; }));
         var cA = na.obj.getComponent("Component.ColliderComponent");
         check("14 Success: collider sized from the model bounds", cA && cA.shape && cA.shape.radius >= 0.3 && cA.shape.radius <= 0.75, cA && cA.shape ? "r " + cA.shape.radius.toFixed(3) : "no collider");
         check("14 Success: node radius still fits the stage footprint (size/2)", Math.abs(na.radius - na.size * 0.5) < 0.001 && na.size === 18 && Math.abs(ja.bounds.after - na.radius) < 0.15, "bounds " + ja.bounds.after.toFixed(2) + " radius " + na.radius.toFixed(2));

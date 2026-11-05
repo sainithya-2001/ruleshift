@@ -178,6 +178,7 @@ function addShine(n) {   // soft specular blob for depth on spheres
     v.mesh = n.rmv.mesh; v.mainMaterial = SPHERE_MAT.clone(); v.mainPass.baseColor = lerp4(n.color, new vec4(1, 1, 1, 1), 0.7);
     o.getTransform().setLocalScale(vec3.one().uniformScale(0.3));
     o.getTransform().setLocalPosition(new vec3(-0.38, 0.42, 0.62).uniformScale(r));
+    n.shine = o;
 }
 // opts: {shape, color, glow, size (cm), sizeKey, weight, bounce, accel, rest, pos, name, shine}
 function spawnNode(opts) {
@@ -1045,6 +1046,7 @@ function swapInModel(job, gltf) {
     n.radius = n.size * 0.5;
     n.rmv.enabled = false;
     n.glow.forEach(function (o) { o.enabled = false; });
+    if (n.shine) { n.shine.enabled = false; }   // the orb's specular blob must not linger on the model
     n.glowOn = false; n.parts = []; n.modelRoot = holder; n.imagined = true;
     job.bounds = { before: b.radius, after: b2.radius, scale: f };
     job.state = "ok";
