@@ -17,7 +17,7 @@ const SIZE_KEYS = ["S", "M", "L"]
 const WEIGHT_KEYS = ["light", "heavy"]
 const BOUNCE_KEYS = ["low", "high"]
 
-const SURPRISE_PROMPTS = ["a floating paper lantern", "a tiny planet with rings", "a crystal tree", "a sleepy cloud", "a neon koi fish"]
+const SURPRISE_PROMPTS = ["a glowing alien flower", "a floating crystal energy core", "a tiny floating island with trees", "a tiny planet with rings", "a floating paper lantern"]
 
 const TOOLBAR_TEXT_PROBE = 40 // labels are measured at this size, then scaled to the largest size that fits
 const TOOLBAR_TEXT_MAX = 72

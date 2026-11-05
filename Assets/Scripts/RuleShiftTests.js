@@ -410,7 +410,7 @@ if (script.runTests) {
             check("14 Empty voice transcript does not call Snap3D", stub.calls.length === 1);
             api.clearAll(); yield 0.1; stub.calls.length = 0; stub.cbs.length = 0;
             for (var si = 0; si < 6; si++) { ctl.surpriseMe(); yield 0.05; }
-            var EXP = ["a floating paper lantern", "a tiny planet with rings", "a crystal tree", "a sleepy cloud", "a neon koi fish", "a floating paper lantern"];
+            var EXP = ["a glowing alien flower", "a floating crystal energy core", "a tiny floating island with trees", "a tiny planet with rings", "a floating paper lantern", "a glowing alien flower"];
             check("14 Surprise me cycles the 5 prompts in order and wraps", JSON.stringify(stub.calls) === JSON.stringify(EXP), JSON.stringify(stub.calls));
             api.clearAll(); yield 0.2;
             // 15 toolbar: icon-first pills, one-word labels that never wrap, grouped [Play Reset] [Create Surprise Speak] [Unlink Clear]
