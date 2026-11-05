@@ -458,12 +458,16 @@ if (script.runTests) {
         var h1 = T.cause.headPos(0); yield 0.1; var h2 = T.cause.headPos(0);
         check("17 Pulse head travels (moves while in flight)", !!h1 && !!h2 && h1.distance(h2) > 1, h1 && h2 ? h1.distance(h2).toFixed(2) + " cm in 0.1s" : "no pulse");
         check("17 Rule has NOT changed while the pulse is in flight", conns[1].rule === "ATTRACT");
+        var lab0 = conns[1].label.text, col0b = T.linkColor(conns[1]);
+        check("17 Label text and colour are unchanged mid-flight (still the old rule)", lab0 === "ATTRACT" && conns[1].label.text === "ATTRACT" && T.linkColor(conns[1]) === col0b, "label " + lab0);
         var tt17 = 0.2, lastHead = null;
         while (conns[1].rule === "ATTRACT" && tt17 < 2) { lastHead = T.cause.headPos(0) || lastHead; yield 0.02; tt17 += 0.02; }
         check("17 Rule flips on arrival (~0.5 s after the hit)", conns[1].rule === "REPEL" && tt17 > 0.2 && tt17 <= 1.2, "t="+ tt17.toFixed(2) + " rule=" + conns[1].rule);
+        check("17 Label text changes together with the rule on arrival", conns[1].label.text === "REPEL", "label " + conns[1].label.text);
         check("17 Pulse was at the far node when the rule flipped", !!lastHead && lastHead.distance(nodes[2].pos) < 4, lastHead ? lastHead.distance(nodes[2].pos).toFixed(2) + " cm away" : "none");
         check("17 Flipped link flashes on arrival", T.cause.flash(conns[1]) >= 0, "flash " + T.cause.flash(conns[1]).toFixed(2));
         yield 0.5;
+        check("17 Link colour changed to the new rule after the flash", T.linkColor(conns[1]) !== col0b, col0b + " -> " + T.linkColor(conns[1]));
         check("17 Pulse released after arrival, flash over", T.cause.active() === 0 && T.cause.enabled() === 0 && T.cause.flash(conns[1]) < 0);
         // tap edit: rule changes at once, short pulse crosses the link, link flashes at the end
         var tr0 = conns[1].rule; T.cycleRule(conns[1], "tap");
