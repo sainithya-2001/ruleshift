@@ -342,7 +342,7 @@ function makeSlot(A, B) {
     c.mCenter = new vec3((mx.x + mn.x) / 2, (mx.y + mn.y) / 2, (mx.z + mn.z) / 2);
     visual.getTransform().setLocalScale(vec3.one());
     c.collider = visual.getComponent("Component.ColliderComponent");
-    c.pop = -1; c.active = false;
+    c.pop = -1; c.flash = -1; c.active = false;
     var lo = global.scene.createSceneObject("Rule Label");
     c.labelObj = lo;
     c.label = lo.createComponent("Component.Text");
@@ -401,6 +401,7 @@ function pressEndNode(n, allowTap) {
     if (allowTap && elapsed - n.tapT < 0.35 && p.distance(n.tapP) < 1.5) { handleTapNode(n); }
 }
 function clearLinks() {
+    clearCause();
     slots.forEach(function (c) { c.active = false; c.visual.enabled = false; c.labelObj.enabled = false; });
     refreshConnections();
     selNode = null;
@@ -420,7 +421,10 @@ function updateSelection() {
     });
 }
 
-function cycleRule(c, why) { setRule(c, RULE_ORDER[(RULE_ORDER.indexOf(c.rule) + 1) % RULE_ORDER.length], why); }
+function cycleRule(c, why) {   // a manual edit: the rule changes at once and a short pulse crosses the link so it feels physical
+    setRule(c, RULE_ORDER[(RULE_ORDER.indexOf(c.rule) + 1) % RULE_ORDER.length], why);
+    launchCause(c, "tap", c.A.pos.add(new vec3(0, 0, 0)), c.A, c.B, TAP_PULSE_TIME);
+}
 function setRule(c, rule, why) {
     c.rule = rule;
     c.pop = 0;
@@ -462,9 +466,88 @@ function checkCollisions() {
         print("RULESHIFT COLLISION " + A.obj.name + "-" + B.obj.name);
         connections.forEach(function (o) {
             if (o === c || o.rule === RULES.COLLISION_TRIGGER) { return; }
-            if (o.A === A || o.A === B || o.B === A || o.B === B) { setRule(o, flip(o.rule), "collision"); }
+            if (o.A === A || o.A === B || o.B === A || o.B === B) {
+                // cause precedes effect: a pulse travels from the collision point along the link, and the rule flips only when it arrives
+                var shared = (o.A === A || o.A === B) ? o.A : o.B, far = shared === o.A ? o.B : o.A;
+                var mid = A.pos.add(B.pos).uniformScale(0.5);
+                if (!launchCause(o, "flip", mid, shared, far, CAUSE_TIME)) { setRule(o, flip(o.rule), "collision"); o.flash = 0; }   // pool exhausted: flip at once rather than lose it
+            }
         });
     });
+}
+// ---------- visible cause chains: pooled glowing pulses (unlit additive head + 3-sphere trail) ----------
+var CAUSE_TIME = 0.5, TAP_PULSE_TIME = 0.3, FLASH_TIME = 0.35, CAUSE_POOL = 12;
+var CAUSE_SIZES = [3.8, 3.1, 2.4, 1.7], CAUSE_ALPHA = [1, 0.6, 0.35, 0.18], CAUSE_LAG = 0.07;
+var WHITE4 = new vec4(1, 1, 1, 1);
+var SPHERE_D = Math.max(SPHERE_MESH.aabbMax.x - SPHERE_MESH.aabbMin.x, 0.0001);
+var causePool = [], causeActive = [], realDt = 0.016;
+function makeCausePulse() {
+    var root = global.scene.createSceneObject("Cause Pulse");
+    var par = NODE_TMPL.getParent();
+    if (par) { root.setParent(par); }
+    root.layer = NODE_TMPL.layer;
+    root.enabled = false;
+    var p = { root: root, parts: [], busy: false, c: null };
+    for (var i = 0; i < CAUSE_SIZES.length; i++) {
+        var o = global.scene.createSceneObject("Pulse " + i);
+        o.setParent(root); o.layer = root.layer;
+        var v = o.createComponent("Component.RenderMeshVisual");
+        v.mesh = SPHERE_MESH; v.mainMaterial = SPHERE_MAT.clone();
+        var ps = v.mainPass;
+        ps.blendMode = BlendMode.Add; ps.depthWrite = false; ps.depthTest = false;
+        var a = CAUSE_ALPHA[i];
+        ps.baseColor = new vec4(1.0 * a, 0.95 * a, 0.75 * a, a);
+        v.setRenderOrder(60 - i);
+        o.getTransform().setLocalScale(vec3.one().uniformScale(CAUSE_SIZES[i] / SPHERE_D));
+        p.parts.push(o.getTransform());
+    }
+    causePool.push(p);
+    return p;
+}
+function causePointAt(p, s) {   // s in 0..1 along: start point -> shared node -> far node (positions are live, nodes may move)
+    var sh = p.shared.pos, fr = p.far.pos;
+    var d1 = p.P.distance(sh), d2 = sh.distance(fr);
+    var t = s * (d1 + d2);
+    if (t <= d1) { return p.P.add(sh.sub(p.P).uniformScale(d1 > 0.001 ? t / d1 : 1)); }
+    return sh.add(fr.sub(sh).uniformScale(d2 > 0.001 ? (t - d1) / d2 : 1));
+}
+function launchCause(c, mode, P, shared, far, dur) {
+    var p = null;
+    for (var i = 0; i < causePool.length; i++) { if (!causePool[i].busy) { p = causePool[i]; break; } }
+    if (!p && causePool.length < CAUSE_POOL) { p = makeCausePulse(); }
+    if (!p) { return false; }
+    p.busy = true; p.c = c; p.mode = mode; p.P = new vec3(P.x, P.y, P.z); p.shared = shared; p.far = far; p.age = 0; p.dur = dur;
+    p.root.enabled = true;
+    positionCause(p, 0);
+    causeActive.push(p);
+    return true;
+}
+function positionCause(p, u) {
+    for (var i = 0; i < p.parts.length; i++) { p.parts[i].setLocalPosition(causePointAt(p, Math.max(0, u - i * CAUSE_LAG))); }
+}
+function releaseCause(p) {
+    p.busy = false; p.c = null; p.root.enabled = false;
+    var i = causeActive.indexOf(p);
+    if (i >= 0) { causeActive.splice(i, 1); }
+}
+function updateCause(dt) {
+    for (var i = causeActive.length - 1; i >= 0; i--) {
+        var p = causeActive[i];
+        if (!p.c.active || slots.indexOf(p.c) < 0 || nodeIndex(p.shared) < 0 || nodeIndex(p.far) < 0) { releaseCause(p); continue; }   // link or node deleted mid-flight: no effect
+        p.age += dt;
+        var u = Math.min(1, p.age / p.dur);
+        positionCause(p, u);
+        if (u >= 1) {   // arrival: only now does the rule change, and the link flashes
+            var c = p.c;
+            if (p.mode === "flip" && flip(c.rule) !== c.rule) { setRule(c, flip(c.rule), "collision"); }
+            c.flash = 0; c.pop = 0;
+            releaseCause(p);
+        }
+    }
+}
+function clearCause() {   // Reset / Clear: drop every in-flight pulse WITHOUT applying its pending flip
+    for (var i = causeActive.length - 1; i >= 0; i--) { releaseCause(causeActive[i]); }
+    slots.forEach(function (c) { if (c.flash >= 0) { c.flash = -1; applyColor(c); } });
 }
 function updatePulses(dt) {
     nodes.forEach(function (n) {
@@ -618,6 +701,11 @@ function updateVisual(c) {
     tr.setLocalRotation(quat.rotationFromTo(UP, dir));
     var pk = 0;
     if (c.pop >= 0) { c.pop += lastDt; pk = c.pop >= POP_TIME ? 0 : Math.sin(Math.PI * c.pop / POP_TIME); if (c.pop >= POP_TIME) { c.pop = -1; } }
+    if (c.flash >= 0) {   // arrival flash: white-hot, fading back to the (new) rule colour
+        c.flash += realDt;
+        if (c.flash >= FLASH_TIME) { c.flash = -1; applyColor(c); }
+        else { c.rmv.mainPass.baseColor = lerp4(RULE_COLOR[c.rule], WHITE4, 1 - c.flash / FLASH_TIME); }
+    }
     var w = Math.min(c.A.radius, c.B.radius) * 0.5 * (1 + 1.2 * pk);   // visible cylinder diameter = quarter of the smaller radius*2
     var sx = w / c.mW, sy = dist / c.mL, sz = w / c.mD;
     c.visTr.setLocalScale(new vec3(sx, sy, sz));
@@ -643,12 +731,14 @@ function resetWorld() {   // restores positions; created objects and links are k
         n.vel = vec3.zero(); n.force = vec3.zero(); n.pulse = -1; n.dragging = false;
         n.tr.setLocalPosition(n.pos); n.tr.setLocalScale(n.baseScale);
     });
+    clearCause();
     connections.forEach(function (c) { c.cooldownUntil = 0; updateVisual(c); });
     selNode = null;
     if (goalEnabled) { goalStage = 0; settleTime = 0; goalText.text = GOAL_1; nextText.text = "Next: " + GOAL_2; }
     setState("creation");
 }
 function clearAll() {
+    clearCause();
     for (var k = slots.length - 1; k >= 0; k--) { destroySlot(slots[k]); }
     for (var i = nodes.length - 1; i >= 0; i--) { nodes[i].obj.destroy(); }
     nodes.length = 0; refreshConnections(); updateEmptyHint();
@@ -724,6 +814,15 @@ script.api.test = {   // read/write hooks for RuleShiftTests.js
     pressEnd: function (i, allowTap) { pressEndNode(nodes[i], allowTap); },
     clearLinks: clearLinks, selected: function () { return selNode ? nodeIndex(selNode) : -1; }, setRule: setRule, cycleRule: cycleRule,
     pendingBinds: function () { return pendingBinds.length; },
+    cause: {
+        active: function () { return causeActive.length; },
+        enabled: function () { return causePool.filter(function (p) { return p.root.enabled; }).length; },
+        poolSize: function () { return causePool.length; },
+        info: function () { return causeActive.map(function (p) { return { mode: p.mode, age: p.age, dur: p.dur, rule: p.c.rule, link: slots.indexOf(p.c) }; }); },
+        headPos: function (k) { var p = causeActive[k]; return p ? p.parts[0].getLocalPosition() : null; },
+        flash: function (c) { return c.flash; },
+        setTime: function (t) { CAUSE_TIME = t; }
+    },
     deleteNode: function (i) { return deleteNode(nodes[i]); },
     box: { x: BOX_X, yMin: BOX_YMIN, yMax: BOX_YMAX, zr: BOX_Z, buttonTop: -21 },
     goalStage: function () { return goalStage; },
@@ -739,6 +838,7 @@ script.createEvent("UpdateEvent").bind(function (e) {
     var dt = Math.min(e.getDeltaTime(), 0.05);
     frameCount++;
     lastDt = dt;
+    realDt = Math.min(e.getDeltaTime(), 0.25);   // wall-clock step: cause pulses and flashes keep real-time pacing at low Preview fps
     elapsed += e.getDeltaTime();
     // bind SIK events on clones once their Interactable has initialised
     for (var pi = pendingBinds.length - 1; pi >= 0; pi--) {
@@ -774,6 +874,7 @@ script.createEvent("UpdateEvent").bind(function (e) {
     }
     if (state === "live") { checkCollisions(); }
     updatePulses(dt);
+    updateCause(realDt);
     updateImagine(dt);
     updateSelection();
     hintObj.enabled = !!pendingPlace && !goalEnabled;

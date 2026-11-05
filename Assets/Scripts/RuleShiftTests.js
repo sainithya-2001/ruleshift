@@ -1,6 +1,7 @@
 // @input Component.ScriptComponent controller
 // @input bool runTests = false
 // @input bool liveImagine = false
+// @input bool showCause = false
 // @input string liveImaginePrompt = "a floating paper lantern"
 
 // Self-driving test harness for RULESHIFT. Set runTests=true, run Preview, read the RULESHIFT TEST lines.
@@ -59,7 +60,9 @@ if (script.runTests) {
         T.place(0, new vec3(-rs / 2, -5, z)); T.place(1, new vec3(rs / 2, -5, z)); T.place(2, new vec3(0, 8, z));
         yield 0.08;
         check("3 Collision: pulse fires", nodes[0].pulse >= 0 || nodes[1].pulse >= 0);
-        check("3 Collision: other link flipped to REPEL", conns[1].rule === "REPEL", "link1=" + conns[1].rule);
+        check("3 Collision: flip waits for the cause pulse (still ATTRACT right after the hit)", conns[1].rule === "ATTRACT", "link1=" + conns[1].rule);
+        yield 0.8;
+        check("3 Collision: other link flipped to REPEL once the pulse arrived", conns[1].rule === "REPEL", "link1=" + conns[1].rule);
 
         // 4. Pause freezes, resume moves
         api.reset(); yield 0.2;
@@ -442,6 +445,49 @@ if (script.runTests) {
             api.clearAll(); yield 0.2;
         }
 
+        // 17 visible cause chains: pulse travels first, the rule flips only on arrival, Reset leaves nothing behind
+        api.loadDemo(); yield 0.5; api.reset(); yield 0.3;
+        var z17 = nodes[0].initial.z, rs17 = nodes[0].radius + nodes[1].radius;
+        check("17 No pulses before any event", T.cause.active() === 0 && T.cause.enabled() === 0);
+        T.setRule(conns[0], "COLLISION_TRIGGER", "test"); T.setRule(conns[1], "ATTRACT", "test");
+        api.activate(); yield 0.1;
+        T.place(0, new vec3(-rs17 / 2, -5, z17)); T.place(1, new vec3(rs17 / 2, -5, z17)); T.place(2, new vec3(0, 8, z17));
+        yield 0.1;
+        var inf17 = T.cause.info();
+        check("17 Collision spawns a pulse on the link it will flip", T.cause.active() === 1 && T.cause.enabled() === 1 && inf17[0].mode === "flip" && inf17[0].link === 1, JSON.stringify(inf17));
+        var h1 = T.cause.headPos(0); yield 0.1; var h2 = T.cause.headPos(0);
+        check("17 Pulse head travels (moves while in flight)", !!h1 && !!h2 && h1.distance(h2) > 1, h1 && h2 ? h1.distance(h2).toFixed(2) + " cm in 0.1s" : "no pulse");
+        check("17 Rule has NOT changed while the pulse is in flight", conns[1].rule === "ATTRACT");
+        var tt17 = 0.2, lastHead = null;
+        while (conns[1].rule === "ATTRACT" && tt17 < 2) { lastHead = T.cause.headPos(0) || lastHead; yield 0.02; tt17 += 0.02; }
+        check("17 Rule flips on arrival (~0.5 s after the hit)", conns[1].rule === "REPEL" && tt17 > 0.2 && tt17 <= 1.2, "t="+ tt17.toFixed(2) + " rule=" + conns[1].rule);
+        check("17 Pulse was at the far node when the rule flipped", !!lastHead && lastHead.distance(nodes[2].pos) < 4, lastHead ? lastHead.distance(nodes[2].pos).toFixed(2) + " cm away" : "none");
+        check("17 Flipped link flashes on arrival", T.cause.flash(conns[1]) >= 0, "flash " + T.cause.flash(conns[1]).toFixed(2));
+        yield 0.5;
+        check("17 Pulse released after arrival, flash over", T.cause.active() === 0 && T.cause.enabled() === 0 && T.cause.flash(conns[1]) < 0);
+        // tap edit: rule changes at once, short pulse crosses the link, link flashes at the end
+        var tr0 = conns[1].rule; T.cycleRule(conns[1], "tap");
+        check("17 Tap edit changes the rule at once and sends a pulse", conns[1].rule !== tr0 && T.cause.active() === 1 && T.cause.info()[0].mode === "tap");
+        var g17 = 0; while (T.cause.active() > 0 && g17++ < 60) { yield 0.02; }
+        check("17 Tap pulse finishes and the link flashes", T.cause.active() === 0 && T.cause.flash(conns[1]) >= 0);
+        yield 0.5;
+        // pool is reused, never grows past its cap
+        for (var sp = 0; sp < 30; sp++) { T.cycleRule(conns[sp % 2 === 0 ? 0 : 1], "spam"); }
+        check("17 Pool stays capped under spam", T.cause.poolSize() <= 12 && T.cause.active() <= 12, "pool " + T.cause.poolSize());
+        yield 0.8;
+        check("17 Pooled pulses all released afterwards", T.cause.active() === 0 && T.cause.enabled() === 0, "active " + T.cause.active());
+        // Reset mid-flight: nothing left over and the pending flip never happens
+        api.reset(); yield 0.2;
+        T.setRule(conns[0], "COLLISION_TRIGGER", "test"); T.setRule(conns[1], "ATTRACT", "test");
+        api.activate(); yield 0.1;
+        T.place(0, new vec3(-rs17 / 2, -5, z17)); T.place(1, new vec3(rs17 / 2, -5, z17)); T.place(2, new vec3(0, 8, z17));
+        yield 0.15;
+        check("17 Pulse in flight before Reset", T.cause.active() >= 1);
+        api.reset();
+        check("17 Reset leaves no pulse objects or flashes", T.cause.active() === 0 && T.cause.enabled() === 0 && conns.every(function (c) { return T.cause.flash(c) < 0; }), "active " + T.cause.active());
+        yield 0.9;
+        check("17 Reset cancels the pending flip", conns[1].rule === "ATTRACT", "link1=" + conns[1].rule);
+
         api.reset();
         var pass = results.filter(function (r) { return r; }).length;
         print("RULESHIFT TEST SUMMARY: " + pass + "/" + results.length + " PASS" + (pass === results.length ? " - ALL PASS" : " - FAILURES"));
@@ -489,6 +535,26 @@ if (script.liveImagine) {
                     }
                     st = "done";
                 }
+            }
+        });
+    });
+}
+
+// Visual check (not a test): stretch the cause pulse to 8 s, fire a collision, and print a marker mid-flight so a screenshot can catch it.
+if (script.showCause) {
+    script.createEvent("OnStartEvent").bind(function () {
+        var api = script.controller.api, T = api.test, st = 0, el = 0, z = -95;
+        script.createEvent("UpdateEvent").bind(function (e) {
+            el += e.getDeltaTime();
+            if (st === 0 && el > 1) {
+                api.loadDemo(); T.cause.setTime(8); st = 1;
+            } else if (st === 1 && el > 2) {
+                var n = T.nodes, c = T.connections, rs = n[0].radius + n[1].radius;
+                T.setRule(c[0], "COLLISION_TRIGGER", "x"); T.setRule(c[1], "ATTRACT", "x");
+                api.activate();
+                T.place(0, new vec3(-rs / 2 - 4, -5, z)); T.place(1, new vec3(rs / 2 - 4, -5, z)); T.place(2, new vec3(8, 6, z)); st = 2;
+            } else if (st === 2 && el > 4.5) {
+                print("RULESHIFT SHOWCAUSE mid-flight active=" + T.cause.active() + " rule=" + T.connections[1].rule); st = 3;
             }
         });
     });

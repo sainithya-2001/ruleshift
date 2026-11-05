@@ -32,6 +32,7 @@
     liveImagine: false
     liveImaginePrompt: false
     runTests: false
+    showCause: false
   ScriptTypesHidden:
     {}
   ReadMe: !<reference> 00000000-0000-0000-0000-000000000000
@@ -44,6 +45,7 @@
     - controller: !<reference.ScriptComponent> 00000000-0000-0000-0000-000000000000
       runTests: false
       liveImagine: false
+      showCause: false
       liveImaginePrompt: a glowing jellyfish
   ScriptTypes:
     -
