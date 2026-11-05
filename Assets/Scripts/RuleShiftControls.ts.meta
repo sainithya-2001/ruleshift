@@ -31,6 +31,8 @@
     controller: false
     iconAdd: false
     iconClose: false
+    iconMic: false
+    iconMicOn: false
     iconPause: false
     iconPlay: false
     iconReset: false
@@ -51,6 +53,8 @@
       iconAdd: !<reference.Texture> 00000000-0000-0000-0000-000000000000
       iconClose: !<reference.Texture> 00000000-0000-0000-0000-000000000000
       iconTrash: !<reference.Texture> 00000000-0000-0000-0000-000000000000
+      iconMic: !<reference.Texture> 00000000-0000-0000-0000-000000000000
+      iconMicOn: !<reference.Texture> 00000000-0000-0000-0000-000000000000
   ScriptTypes:
     -
       {}
@@ -62,3 +66,5 @@
     - // @input Asset.Texture iconAdd
     - // @input Asset.Texture iconClose
     - // @input Asset.Texture iconTrash
+    - // @input Asset.Texture iconMic
+    - // @input Asset.Texture iconMicOn
