@@ -31,6 +31,7 @@
     camera: false
     debugAutoToggle: false
     demoPreset: false
+    imagineMaterial: false
     linkTemplate: false
     nodeTemplate: false
     strength: false
@@ -49,6 +50,7 @@
       debugAutoToggle: true
       demoPreset: false
       camera: !<reference.Camera> 00000000-0000-0000-0000-000000000000
+      imagineMaterial: !<reference.Material> 00000000-0000-0000-0000-000000000000
   ScriptTypes:
     -
       {}

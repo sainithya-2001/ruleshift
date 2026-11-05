@@ -1,5 +1,7 @@
 import {Button} from "SpectaclesUIKit.lspkg/Scripts/Components/Button/Button"
 import {ElementContent} from "SpectaclesUIKit.lspkg/Scripts/Components/Content/ElementContent"
+import {snap3DGenerate} from "./Snap3DGenerator"
+import {getSnapToken} from "./Snap3DConfig"
 
 const SHAPES = ["sphere", "cube", "crystal", "cone", "torus"]
 const SHAPE_LABELS = ["Orb", "Cube", "Gem", "Cone", "Ring"]
@@ -14,6 +16,8 @@ const COLORS = [
 const SIZE_KEYS = ["S", "M", "L"]
 const WEIGHT_KEYS = ["light", "heavy"]
 const BOUNCE_KEYS = ["low", "high"]
+
+const SURPRISE_PROMPTS = ["a glowing jellyfish", "a tiny planet with rings", "a crystal tree", "a sleepy cloud", "a neon koi fish"]
 
 const Z = -95 // the world's depth plane
 const ASR_INITIAL_WINDOW = 10 // seconds to start speaking
@@ -51,6 +55,7 @@ export class RuleShiftControls extends BaseScriptComponent {
   private asrLastEventAt = 0
   private asrEvents = 0
   private lastState: string = ""
+  private surpriseIndex = 0
   private palette: SceneObject
   private paletteParts: SceneObject[] = []
   private deleteObj: SceneObject
@@ -70,6 +75,8 @@ export class RuleShiftControls extends BaseScriptComponent {
 
     this.createEvent("OnStartEvent").bind(() => {
       this.controller.api.onState((st: string) => this.onState(st))
+      this.controller.api.setGenerator(snap3DGenerate)
+      print("RULESHIFT Snap3D token: " + (getSnapToken().length > 0 ? "present (local override)" : "absent - imagined objects will fall back to the orb"))
       this.setPalette(false)
     })
     this.createEvent("UpdateEvent").bind(() => {
@@ -108,11 +115,11 @@ export class RuleShiftControls extends BaseScriptComponent {
   private buildToolbar() {
     const api = this.controller.api
     const h = 6.3
-    const labels = ["Activate", "Reset", "Create", "Speak", "Clear links", "Clear all"]
-    const icons = [this.iconPlay, this.iconReset, this.iconAdd, this.iconMic, this.iconClose, this.iconTrash]
-    let widths = [8.9, 7.6, 8.0, 7.6, 10.1, 9.2]
+    const labels = ["Activate", "Reset", "Create", "Speak", "Surprise me", "Clear links", "Clear all"]
+    const icons = [this.iconPlay, this.iconReset, this.iconAdd, this.iconMic, null, this.iconClose, this.iconTrash]
+    let widths = [8.9, 7.6, 8.0, 7.6, 11.4, 10.1, 9.2]
     const gap = 0.3
-    const total = widths.reduce((a, b) => a + b, 0) + gap * 4
+    const total = widths.reduce((a, b) => a + b, 0) + gap * 5
     const k = Math.min(1, (this.halfW * 2 - 1.5) / total)
     widths = widths.map((w) => w * k)
     const y = -this.halfH + 0.8 + h / 2
@@ -131,8 +138,9 @@ export class RuleShiftControls extends BaseScriptComponent {
     pills[2].button.onTriggerUp.add(() => this.setPalette(!this.palette.enabled))
     this.speakPill = pills[3]
     pills[3].button.onTriggerUp.add(() => this.toggleSpeak())
-    pills[4].button.onTriggerUp.add(() => this.controller.api.clearLinks())
-    pills[5].button.onTriggerUp.add(() => this.controller.api.clearAll())
+    pills[4].button.onTriggerUp.add(() => this.surpriseMe())
+    pills[5].button.onTriggerUp.add(() => this.controller.api.clearLinks())
+    pills[6].button.onTriggerUp.add(() => this.controller.api.clearAll())
   }
 
   // ---- Voice creation: ASR transcript -> keyword parser (in the controller) -> spawn ----
@@ -233,7 +241,8 @@ export class RuleShiftControls extends BaseScriptComponent {
       return
     }
     if (!p.found) {
-      this.showCaption("Try: 'a glowing blue ring'", 3)
+      // no palette shape word: imagine it with Snap3D (a placeholder orb stands in while it generates)
+      this.imagine(text)
       return
     }
     const s = this.sel
@@ -247,6 +256,19 @@ export class RuleShiftControls extends BaseScriptComponent {
     })
     this.setPalette(false)
     this.showCaption(text.trim() + " ✓", 3)
+  }
+
+  // ---- Snap3D: imagined objects (placeholder orb -> generated model; orb stays on failure/timeout) ----
+  private imagine(prompt: string) {
+    const idx = this.controller.api.imagine(prompt)
+    this.setPalette(false)
+    if (idx < 0) this.showCaption("Too many objects - clear some first", 3)
+  }
+
+  private surpriseMe() {
+    const prompt = SURPRISE_PROMPTS[this.surpriseIndex % SURPRISE_PROMPTS.length]
+    this.surpriseIndex++
+    this.imagine(prompt)
   }
 
   private onState(st: string) {

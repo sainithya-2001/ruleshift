@@ -290,6 +290,119 @@ if (script.runTests) {
         check("13 Voice parse: missing parameters stay null (palette defaults apply)", vp.color === null && vp.sizeKey === null && vp.glow === null && vp.weight === null && vp.bounce === null);
         check("13 Voice parse: first shape word wins", api.parseVoice("a cone and a cube").shape === "cone");
 
+        // 14: Snap3D "imagine" with a STUBBED generator (no network, no token): pending orb, swap, failure, timeout
+        var stub = { calls: [], cbs: [], cancelled: 0, mat: undefined, matCalls: 0 };
+        var fakeAsset = function () {
+            return { tryInstantiate: function (parent, mat) {
+                stub.matCalls++; stub.mat = mat;
+                var o = api.makePlate("Fake Model", 30, 9, 9, vec3.zero(), new vec4(1, 0.6, 0.2, 1));
+                o.setParent(parent); o.getTransform().setLocalPosition(vec3.zero());
+                return o;
+            } };
+        };
+        api.setGenerator(function (prompt, cb) { stub.calls.push(prompt); stub.cbs.push(cb); return function () { stub.cancelled++; }; });
+        api.clearAll(); yield 0.2; api.imagineTimeout(120);
+
+        // 14a pending: a normal orb node, pulsing, with the caption
+        var ia = api.imagine("a glowing jellyfish"); yield 0.15;
+        var ja = nodes[ia].job, sa = nodes[ia].tr.getLocalScale().x; yield 0.12; var sb = nodes[ia].tr.getLocalScale().x; yield 0.12; var sc2 = nodes[ia].tr.getLocalScale().x;
+        check("14 Imagine spawns a placeholder orb node while pending", ia === 0 && api.count() === 1 && ja.state === "pending" && stub.calls[0] === "a glowing jellyfish");
+        check("14 Placeholder orb pulses", Math.abs(sa - sb) > 0.01 || Math.abs(sb - sc2) > 0.01, sa.toFixed(2) + "," + sb.toFixed(2) + "," + sc2.toFixed(2));
+        check("14 Caption reads Imagining '<prompt>'…", ja.cap && ja.cap.text.text === "Imagining 'a glowing jellyfish'…", ja.cap ? ja.cap.text.text : "no caption");
+        check("14 Orb is interactable like any node", T.pendingBinds() === 0 || nodes[ia].obj.getComponents("Component.ScriptComponent").length > 0);
+
+        // 14b success: swap the model in as a normal node
+        var nb = api.spawn({ shape: "cube", sizeKey: "M", color: [0, 0.85, 1] }); yield 0.15;
+        stub.cbs[0].onSuccess(fakeAsset()); yield 0.3;
+        var na = nodes[ia], mr = na.modelRoot;
+        check("14 Success: state ok and the model replaced the orb", ja.state === "ok" && na.imagined === true && mr && na.rmv.enabled === false, ja.state);
+        check("14 Success: a real material was passed to tryInstantiate", stub.matCalls === 1 && stub.mat !== null && stub.mat !== undefined);
+        check("14 Success: caption removed", ja.cap === null);
+        var cA = na.obj.getComponent("Component.ColliderComponent");
+        check("14 Success: collider sized from the model bounds", cA && cA.shape && cA.shape.radius >= 0.3 && cA.shape.radius <= 0.75, cA && cA.shape ? "r " + cA.shape.radius.toFixed(3) : "no collider");
+        check("14 Success: node radius still fits the stage footprint (size/2)", Math.abs(na.radius - na.size * 0.5) < 0.001 && na.size <= 14);
+        check("14 Success: model is centred on the node", mr && mr.getTransform().getWorldPosition().distance(na.tr.getWorldPosition()) < na.size, "");
+        // behaves as a normal node: draggable, linkable, all rules
+        T.pressStart(ia); na.tr.setLocalPosition(new vec3(-6, -4, z)); yield 0.15;
+        check("14 Swapped node is draggable (position follows the hand)", Math.abs(na.pos.x + 6) < 0.3 && Math.abs(na.pos.y + 4) < 0.3, na.pos.x.toFixed(1) + "," + na.pos.y.toFixed(1));
+        T.pressEnd(ia, false);
+        T.place(ia, new vec3(-10, -4, z)); T.place(nb, new vec3(11, -4, z)); yield 0.1;   // 21 cm apart: beyond the ATTRACT rest distance (6 + 5 + 6 = 17)
+        var lk = T.connect(ia, nb, "ATTRACT");
+        check("14 Swapped node can be linked", lk && lk.active === true);
+        api.activate(); yield 0.1;
+        var d0 = na.pos.distance(nodes[nb].pos); yield 0.8; var d1 = na.pos.distance(nodes[nb].pos);
+        check("14 Rule ATTRACT works on the swapped node", d1 < d0 - 0.2, d0.toFixed(1) + "->" + d1.toFixed(1));
+        T.setRule(lk, "REPEL", "test"); var d2 = na.pos.distance(nodes[nb].pos); yield 0.8; var d3 = na.pos.distance(nodes[nb].pos);
+        check("14 Rule REPEL works on the swapped node", d3 > d2 + 0.2, d2.toFixed(1) + "->" + d3.toFixed(1));
+        T.setRule(lk, "COLLISION_TRIGGER", "test");
+        check("14 Rule COLLISION_TRIGGER set on the swapped node", lk.rule === "COLLISION_TRIGGER");
+        stub.cbs[0].onFail("late failure after success"); yield 0.2;
+        check("14 A second callback after success changes nothing", ja.state === "ok");
+        api.clearAll(); yield 0.2;
+
+        // 14c failure keeps the orb and shows the fallback caption
+        api.reset(); stub.calls.length = 0; stub.cbs.length = 0;
+        var ic = api.imagine("a sleepy cloud"); yield 0.1;
+        var jc = nodes[ic].job; stub.cbs[0].onFail("boom"); yield 0.3;
+        check("14 Failure: state failed, orb stays as the object", jc.state === "failed" && api.count() === 1 && nodes[ic].rmv.enabled === true && !nodes[ic].imagined);
+        check("14 Failure: caption is \"Couldn't imagine that — here's an orb\"", jc.cap && jc.cap.text.text === "Couldn't imagine that — here's an orb", jc.cap ? jc.cap.text.text : "none");
+        T.pressStart(ic); nodes[ic].tr.setLocalPosition(new vec3(4, -3, z)); yield 0.15; T.pressEnd(ic, false);
+        check("14 Failed orb is still a working node (draggable)", Math.abs(nodes[ic].pos.x - 4) < 0.3 && Math.abs(nodes[ic].pos.y + 3) < 0.3, nodes[ic].pos.x.toFixed(1) + "," + nodes[ic].pos.y.toFixed(1));
+        yield 4.4;
+        check("14 Failure caption disappears after a few seconds", jc.cap === null);
+        api.clearAll(); yield 0.2;
+
+        // 14d timeout (shortened for the test) + late success ignored + generator cancelled
+        stub.calls.length = 0; stub.cbs.length = 0; var cancelled0 = stub.cancelled;
+        api.imagineTimeout(0.6);
+        var id2 = api.imagine("a neon koi fish"); var jd = nodes[id2].job; yield 0.3;
+        check("14 Timeout: still pending before the limit", jd.state === "pending");
+        yield 0.6;
+        check("14 Timeout: fails with a timeout reason and keeps the orb", jd.state === "failed" && jd.reason.indexOf("timeout") === 0 && api.count() === 1, jd.reason);
+        check("14 Timeout: caption shows the fallback text", jd.cap && jd.cap.text.text.indexOf("here's an orb") > 0);
+        check("14 Timeout: generator job was cancelled", stub.cancelled === cancelled0 + 1);
+        stub.cbs[0].onSuccess(fakeAsset()); yield 0.3;
+        check("14 Late success after timeout is ignored", jd.state === "failed" && !nodes[id2].imagined && stub.matCalls === 1);
+        api.imagineTimeout(120);
+        check("14 Default timeout is 120 s", api.imagineTimeout() === 120);
+        api.clearAll(); yield 0.2;
+
+        // 14e deleting the placeholder cancels the job; no generator installed -> immediate orb fallback
+        stub.calls.length = 0; stub.cbs.length = 0; var cancelled1 = stub.cancelled;
+        var ie = api.imagine("a crystal tree"); yield 0.1; T.deleteNode(ie); yield 0.2;
+        check("14 Deleting the placeholder cancels the job and clears its caption", stub.cancelled === cancelled1 + 1 && api.imagineJobs.length === 0 && api.count() === 0);
+        api.setGenerator(null);
+        var if2 = api.imagine("anything"); yield 0.3;
+        check("14 No generator: falls back to the orb", nodes[if2].job.state === "failed" && api.count() === 1);
+        api.clearAll(); yield 0.2;
+        api.setGenerator(function (prompt, cb) { stub.calls.push(prompt); stub.cbs.push(cb); return function () { stub.cancelled++; }; });
+
+        // 14f prompt cleanup, voice routing and the Surprise me cycle (through the real controls component)
+        check("14 cleanPrompt strips command words, keeps the description", api.cleanPrompt("Make me a glowing jellyfish!") === "a glowing jellyfish" && api.cleanPrompt("a neon koi fish.") === "a neon koi fish" && api.cleanPrompt("") === "");
+        var ctl = null;
+        global.scene.getRootObjectsCount && (function () {
+            for (var ri = 0; ri < global.scene.getRootObjectsCount(); ri++) {
+                var ro = global.scene.getRootObject(ri);
+                if (ro.name === "RULESHIFT Controls") { ro.getComponents("Component.ScriptComponent").forEach(function (c) { if (c.handleTranscript && c.surpriseMe) { ctl = c; } }); }
+            }
+        })();
+        check("14 Controls component found for UI-level checks", ctl !== null);
+        if (ctl) {
+            stub.calls.length = 0; stub.cbs.length = 0;
+            ctl.handleTranscript("a big red cube"); yield 0.1;
+            check("14 Voice with a palette shape word spawns a palette object, not Snap3D", api.count() === 1 && stub.calls.length === 0);
+            api.clearAll(); yield 0.1;
+            ctl.handleTranscript("a glowing jellyfish"); yield 0.1;
+            check("14 Voice with no shape word goes to Snap3D (placeholder orb)", api.count() === 1 && stub.calls.length === 1 && stub.calls[0] === "a glowing jellyfish", JSON.stringify(stub.calls));
+            ctl.handleTranscript(""); yield 0.1;
+            check("14 Empty voice transcript does not call Snap3D", stub.calls.length === 1);
+            api.clearAll(); yield 0.1; stub.calls.length = 0; stub.cbs.length = 0;
+            for (var si = 0; si < 6; si++) { ctl.surpriseMe(); yield 0.05; }
+            var EXP = ["a glowing jellyfish", "a tiny planet with rings", "a crystal tree", "a sleepy cloud", "a neon koi fish", "a glowing jellyfish"];
+            check("14 Surprise me cycles the 5 prompts in order and wraps", JSON.stringify(stub.calls) === JSON.stringify(EXP), JSON.stringify(stub.calls));
+            api.clearAll(); yield 0.2;
+        }
+
         api.reset();
         var pass = results.filter(function (r) { return r; }).length;
         print("RULESHIFT TEST SUMMARY: " + pass + "/" + results.length + " PASS" + (pass === results.length ? " - ALL PASS" : " - FAILURES"));

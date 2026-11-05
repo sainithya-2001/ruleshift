@@ -4,6 +4,7 @@
 // @input bool debugAutoToggle = false
 // @input bool demoPreset = false
 // @input Component.Camera camera
+// @input Asset.Material imagineMaterial
 
 // RULESHIFT system: a dynamic set of nodes (max MAX_NODES) + links {A,B,rule,visual}.
 // Nodes are spawned from the Create palette (or the demo preset). Each frame every active link adds a force to
@@ -772,6 +773,7 @@ script.createEvent("UpdateEvent").bind(function (e) {
     }
     if (state === "live") { checkCollisions(); }
     updatePulses(dt);
+    updateImagine(dt);
     updateSelection();
     hintObj.enabled = !!pendingPlace && !goalEnabled;
     updateGoal(Math.min(e.getDeltaTime(), 0.25));   // real time, so goal timers don't slow down at low frame rates
@@ -855,3 +857,149 @@ function parseVoice(text) {
     return out;
 }
 script.api.parseVoice = parseVoice;
+
+// ---------- Imagine: a text prompt -> Snap3D model ----------
+// imagine(prompt) spawns a normal node (a pulsing placeholder orb with an "Imagining '<prompt>'..." caption). The injected
+// generator (setGenerator) later delivers a glTF asset; the orb's visuals are then swapped for the model while the node
+// keeps all behaviour (drag, link, rules, physics). On failure, or after the timeout, the orb simply stays.
+var IMAGINE_SIZE = 12;                                   // node footprint in cm (between M and L)
+var IMAGINE_COLOR = new vec4(0.7, 0.55, 1.0, 1);
+var IMAGINE_TIMEOUT = 120;                               // seconds
+var FAIL_CAPTION_SECS = 4;
+var CAPTION_FAIL = "Couldn't imagine that — here's an orb";
+var imagineTimeout = IMAGINE_TIMEOUT;
+var imagineGen = null;     // function (prompt, {onSuccess(gltfAsset), onFail(reason)}) -> optional cancel function
+var imagineJobs = [];      // {n, prompt, t0, state: "pending"|"ok"|"failed", result, cap, capUntil, cancel, reason}
+
+function cleanPrompt(text) {
+    var s = String(text || "").replace(/\s+/g, " ").trim();
+    s = s.replace(/^(please\s+)?((can|could) you\s+)?(make|create|add|generate|imagine|give|show|build|spawn)( me| us)?\s+/i, "");
+    s = s.replace(/[.!?,;:\s]+$/, "");
+    return s;
+}
+function setLayerRec(o, layer) {
+    o.layer = layer;
+    for (var i = 0; i < o.getChildrenCount(); i++) { setLayerRec(o.getChild(i), layer); }
+}
+function collectMeshes(o, out) {
+    o.getComponents("Component.RenderMeshVisual").forEach(function (v) { out.push(v); });
+    for (var i = 0; i < o.getChildrenCount(); i++) { collectMeshes(o.getChild(i), out); }
+}
+function worldBounds(root) {   // axis-aligned world bounds of every mesh under root; null when there is no geometry
+    var meshes = []; collectMeshes(root, meshes);
+    var mn = null, mx = null;
+    meshes.forEach(function (v) {
+        if (!v.mesh) { return; }
+        var M = v.getTransform().getWorldTransform(), a = v.mesh.aabbMin, b = v.mesh.aabbMax;
+        for (var i = 0; i < 8; i++) {
+            var p = M.multiplyPoint(new vec3(i & 1 ? b.x : a.x, i & 2 ? b.y : a.y, i & 4 ? b.z : a.z));
+            if (!mn) { mn = new vec3(p.x, p.y, p.z); mx = new vec3(p.x, p.y, p.z); }
+            else { mn = new vec3(Math.min(mn.x, p.x), Math.min(mn.y, p.y), Math.min(mn.z, p.z)); mx = new vec3(Math.max(mx.x, p.x), Math.max(mx.y, p.y), Math.max(mx.z, p.z)); }
+        }
+    });
+    if (!mn) { return null; }
+    var c = mn.add(mx).uniformScale(0.5);
+    return { min: mn, max: mx, center: c, radius: mx.sub(mn).length * 0.5 };
+}
+function imagineMaterial() {   // a real material is always passed to tryInstantiate (null crashes Lens Studio)
+    return (script.imagineMaterial || SPHERE_MAT).clone();
+}
+function finishCaption(job, text, secs) {
+    if (!job.cap) { return; }
+    if (text === null) { job.cap.obj.destroy(); job.cap = null; return; }
+    job.cap.text.text = text; job.capUntil = elapsed + secs;
+}
+function failJob(job, reason) {
+    if (job.state !== "pending") { return; }
+    job.state = "failed"; job.reason = reason;
+    if (job.cancel) { try { job.cancel(); } catch (e) { } }
+    finishCaption(job, CAPTION_FAIL, FAIL_CAPTION_SECS);
+    var n = job.n; if (nodeIndex(n) >= 0) { setNodeColor(n, n.color); n.tr.setLocalScale(n.baseScale); }
+    print("RULESHIFT imagine FAILED '" + job.prompt + "' (" + reason + ") after " + (elapsed - job.t0).toFixed(1) + "s - keeping the orb");
+}
+function swapInModel(job, gltf) {
+    var n = job.n;
+    var holder = global.scene.createSceneObject("Imagined Model");
+    holder.setParent(n.obj);
+    holder.getTransform().setLocalPosition(vec3.zero());
+    holder.getTransform().setLocalScale(vec3.one());
+    var model = gltf.tryInstantiate(holder, imagineMaterial());
+    if (!model) { holder.destroy(); throw new Error("tryInstantiate returned null"); }
+    setLayerRec(holder, n.obj.layer);
+    n.tr.setLocalScale(n.baseScale);                       // measure at the node's resting scale
+    var b = worldBounds(holder);
+    if (!b || b.radius < 1e-5) { holder.destroy(); throw new Error("model has no geometry"); }
+    // fit: scale the model so its bounding sphere matches the orb footprint, and centre it on the node
+    var nodeW = n.tr.getWorldPosition(), ht = holder.getTransform();
+    var f = (n.size * 0.5) / (b.radius * 1.0), off = b.center.sub(nodeW);
+    ht.setLocalScale(vec3.one().uniformScale(f));
+    ht.setWorldPosition(nodeW.sub(off.uniformScale(f)));
+    var b2 = worldBounds(holder);
+    // collider sized from the fitted bounds (sphere radius is in node-local units)
+    var col = n.obj.getComponent("Component.ColliderComponent");
+    if (col && col.shape && col.shape.radius !== undefined) { var sh = col.shape; sh.radius = Math.max(0.3, Math.min(0.75, b2.radius / n.size)); col.shape = sh; }
+    n.radius = n.size * 0.5;
+    n.rmv.enabled = false;
+    n.glow.forEach(function (o) { o.enabled = false; });
+    n.glowOn = false; n.parts = []; n.modelRoot = holder; n.imagined = true;
+    job.bounds = { before: b.radius, after: b2.radius, scale: f };
+    job.state = "ok";
+    finishCaption(job, null);
+    print("RULESHIFT imagine OK '" + job.prompt + "' in " + (elapsed - job.t0).toFixed(1) + "s (fit scale " + f.toFixed(4) + ", radius " + b2.radius.toFixed(2) + ")");
+}
+function imagine(prompt) {
+    prompt = cleanPrompt(prompt) || String(prompt || "").trim();
+    var n = spawnNode({ shape: "sphere", color: IMAGINE_COLOR, glow: true, size: IMAGINE_SIZE, name: "Imagined: " + prompt });
+    if (!n) { return -1; }
+    var cap = makeText("Imagine Caption", 60, new vec3(n.pos.x, n.pos.y + n.radius + 4, WORLD_Z), new vec4(0.85, 0.95, 1, 1));
+    cap.text.text = "Imagining '" + prompt + "'…"; cap.text.renderOrder = 100;
+    var job = { n: n, prompt: prompt, t0: elapsed, state: "pending", result: null, cap: cap, capUntil: 0, cancel: null, reason: "", timeout: imagineTimeout };
+    imagineJobs.push(job);
+    n.job = job;
+    print("RULESHIFT imagine START '" + prompt + "' (timeout " + job.timeout + "s)");
+    if (!imagineGen) { job.result = { ok: false, reason: "no generator installed" }; return nodeIndex(n); }
+    try {
+        job.cancel = imagineGen(prompt, {
+            onSuccess: function (g) { if (job.state === "pending" && !job.result) { job.result = { ok: true, asset: g }; } },
+            onFail: function (why) { if (job.state === "pending" && !job.result) { job.result = { ok: false, reason: String(why) }; } }
+        }) || null;
+    } catch (e) { job.result = { ok: false, reason: "generator threw: " + e }; }
+    return nodeIndex(n);
+}
+function updateImagine(dt) {
+    for (var i = imagineJobs.length - 1; i >= 0; i--) {
+        var job = imagineJobs[i], n = job.n, alive = nodeIndex(n) >= 0;
+        if (!alive) {   // the user deleted the object: cancel the job and drop the caption
+            if (job.state === "pending") { job.state = "cancelled"; if (job.cancel) { try { job.cancel(); } catch (e) { } } }
+            if (job.cap) { job.cap.obj.destroy(); job.cap = null; }
+            imagineJobs.splice(i, 1); continue;
+        }
+        if (job.state === "pending") {
+            if (job.result) {   // results are applied here, on the update loop, never inside the generator's callback
+                var r = job.result; job.result = null;
+                if (r.ok) { try { swapInModel(job, r.asset); } catch (e) { failJob(job, "swap failed: " + e); } }
+                else { failJob(job, r.reason); }
+            } else if (elapsed - job.t0 >= job.timeout) {
+                failJob(job, "timeout after " + job.timeout + "s");
+            }
+        }
+        if (job.state === "pending") {   // pulsing placeholder (skipped while selected / collision-pulsing, which own the scale)
+            var k = 0.5 + 0.5 * Math.sin((elapsed - job.t0) * 5);
+            if (n.pulse < 0 && n !== selNode && !n.selShown) {
+                n.tr.setLocalScale(n.baseScale.uniformScale(0.92 + 0.16 * k));
+                setNodeColor(n, lerp4(n.color, new vec4(1, 1, 1, 1), 0.45 * k));
+            }
+        }
+        if (job.cap) {
+            job.cap.tr.setWorldPosition(new vec3(n.pos.x, Math.min(n.pos.y + n.radius + 4, 22), WORLD_Z));
+            if (job.state === "failed" && elapsed >= job.capUntil) { finishCaption(job, null); }
+        }
+        if (job.state !== "pending" && !job.cap) { imagineJobs.splice(i, 1); }
+    }
+}
+script.api.cleanPrompt = cleanPrompt;
+script.api.setGenerator = function (fn) { imagineGen = fn; };
+script.api.imagine = imagine;
+script.api.imagineTimeout = function (sec) { if (sec !== undefined) { imagineTimeout = sec; } return imagineTimeout; };
+script.api.imagineJobs = imagineJobs;
+script.api.test.imagineState = function (i) { var n = nodes[i]; return n && n.job ? n.job.state : "none"; };

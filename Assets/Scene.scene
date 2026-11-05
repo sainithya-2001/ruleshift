@@ -1140,6 +1140,7 @@
       debugAutoToggle: false
       demoPreset: false
       camera: !<reference.Camera> 00000000-0000-0065-0000-000000000065
+      imagineMaterial: !<reference.Material> 8eebcd57-3582-41fe-9642-3f25700777e8
   ScriptTypes:
     "":
       {}
