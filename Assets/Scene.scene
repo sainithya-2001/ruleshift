@@ -18,6 +18,7 @@
     - !<own> c96a945f-56f6-4ef0-ab0e-f6f942238392
     - !<own> 68608a41-7555-4180-aa24-6a41585e6bbc
     - !<own> 4a04b12b-7ef7-43f7-988b-6c806706db55
+    - !<own> 44722fc5-ffda-439e-b442-f872d71305d3
   layers: !<Layers/267ee9a7-aff2-4f9d-9a49-f71214747d03>
     userLayers:
       - id: 1
@@ -1061,6 +1062,21 @@
     []
   Components:
     []
+- !<SceneObject/44722fc5-ffda-439e-b442-f872d71305d3>
+  PrefabRemaps:
+    []
+  Name: RULESHIFT Controls
+  Enabled: true
+  Layers: 1
+  LocalTransform: !<TransformEntity>
+    Position: {x: 0.000000, y: -22.000000, z: -80.000000}
+    Rotation: {x: 0.000000, y: 0.000000, z: 0.000000}
+    Scale: {x: 1.000000, y: 1.000000, z: 1.000000}
+    HasSegmentScaleCompensation: false
+  Children:
+    []
+  Components:
+    - !<own> 975971ef-f404-4e49-8659-3fb626771cad
 - !<SceneObject/46b79537-a269-46f1-9483-500d7a4170d6>
   PrefabRemaps:
     []
@@ -2093,6 +2109,25 @@
     - !<own> e9454e66-5d09-4a8a-bcd7-dea762326a48
   Components:
     []
+- !<ScriptComponent/975971ef-f404-4e49-8659-3fb626771cad>
+  PrefabRemaps:
+    []
+  Name: RuleShiftControls
+  Enabled: true
+  ScriptAsset: !<reference> 1b2bd3cb-5bc8-42e8-a26b-7d7181f96da6
+  ScriptInputsDefault:
+    buttonSize: true
+    gap: true
+  ScriptTypesDefault:
+    {}
+  ScriptInputs:
+    "":
+      controller: !<reference.ScriptComponent> 4aef1a10-019c-4696-a7b1-b4bd90edb0eb
+      buttonSize: !<Vec2> {x: 13.000000, y: 5.000000}
+      gap: !<float> 2.000000
+  ScriptTypes:
+    "":
+      {}
 - !<SceneObject/988c408a-99dc-47e6-b7c4-efbf4bf8dc3c>
   PrefabRemaps:
     []

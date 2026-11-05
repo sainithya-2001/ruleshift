@@ -146,18 +146,47 @@ function updateVisual(c) {
     tr.setLocalScale(new vec3(s.x, c.baseScaleY * dist / c.baseDist, s.z));
 }
 
+// Modes: creation (stationary, start) -> live <-> paused. Reset -> creation.
+var state = "creation";
+var stateListeners = [];
+function setState(st) {
+    state = st;
+    print("RULESHIFT state -> " + st);
+    stateListeners.forEach(function (f) { f(st); });
+}
+function resetWorld() {
+    nodes.forEach(function (n) {
+        n.pos = new vec3(n.initial.x, n.initial.y, n.initial.z);
+        n.vel = vec3.zero(); n.force = vec3.zero(); n.pulse = -1;
+        n.tr.setLocalPosition(n.pos); n.tr.setLocalScale(n.baseScale);
+    });
+    connections.forEach(function (c) { c.cooldownUntil = 0; updateVisual(c); });
+    setState("creation");
+}
+script.api.getState = function () { return state; };
+script.api.onState = function (f) { stateListeners.push(f); f(state); };
+script.api.activate = function () { if (state === "creation") { setState("live"); } };
+script.api.pause = function () { if (state === "live") { setState("paused"); } };
+script.api.resume = function () { if (state === "paused") { setState("live"); } };
+script.api.toggle = function () {   // Activate -> Pause -> Resume -> Pause ...
+    if (state === "live") { script.api.pause(); } else if (state === "paused") { script.api.resume(); } else { script.api.activate(); }
+};
+script.api.reset = resetWorld;
+
 var elapsed = 0, lastToggle = 0, lastLog = -1;
 script.createEvent("UpdateEvent").bind(function (e) {
     var dt = Math.min(e.getDeltaTime(), 0.05);
     elapsed += e.getDeltaTime();
-    if (script.debugAutoToggle && elapsed - lastToggle >= 3 && connections.length) {
+    if (state === "live" && script.debugAutoToggle && elapsed - lastToggle >= 3 && connections.length) {
         lastToggle = elapsed;
         var c0 = connections[0];
         cycleRule(c0, "auto");
     }
-    computeForces();
-    integrate(dt);
-    checkCollisions();
+    if (state === "live") {
+        computeForces();
+        integrate(dt);
+        checkCollisions();
+    }
     updatePulses(dt);
     connections.forEach(updateVisual);
     if (Math.floor(elapsed) !== lastLog) {
