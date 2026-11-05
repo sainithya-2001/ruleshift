@@ -18,3 +18,8 @@ ls-live-instance.json
 
 # Secrets / signing keys
 *.pem
+
+# Not part of the project: auto-installed Bitmoji package and LEAF test-plugin copy
+Packages/Bitmoji 3D.lsc
+Packages/Bitmoji 3D.lsc.meta
+Plugins/b5c0453c-8076-44a8-aea3-4b878299e9f9/
