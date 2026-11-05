@@ -45,6 +45,10 @@ export class RuleShiftControls extends BaseScriptComponent {
   private heard = ""
   private caption: Text
   private captionTimer = 0
+  private asrStartedAt = 0
+  private asrLastEventAt = 0
+  private asrSilenceLogged = false
+  private asrEvents = 0
   private lastState: string = ""
   private palette: SceneObject
   private paletteParts: SceneObject[] = []
@@ -69,12 +73,25 @@ export class RuleShiftControls extends BaseScriptComponent {
     })
     this.createEvent("UpdateEvent").bind(() => {
       this.updateFloating()
+      if (this.listening && !this.asrSilenceLogged) {
+        const since = getTime() - this.asrLastEventAt
+        if (since >= 2) {
+          this.asrSilenceLogged = true
+          print("RULESHIFT ASR silence timeout: no transcript event for " + since.toFixed(1) + "s (events so far: " + this.asrEvents + ", session age " + (getTime() - this.asrStartedAt).toFixed(1) + "s)")
+        }
+      }
       if (this.captionTimer > 0) {
         this.captionTimer -= getDeltaTime()
         if (this.captionTimer <= 0) this.caption.sceneObject.enabled = false
       }
     })
     this.buildCaption()
+    // Preview has no permission API for the mic; report what is knowable. The first transcript event proves the mic is live.
+    let editor = "unknown"
+    try {
+      editor = String((global as any).deviceInfoSystem.isEditor())
+    } catch (e) {}
+    print("RULESHIFT ASR mic check: isEditor=" + editor + " - Lens Studio exposes no mic-permission query; mic is considered live only if a transcript event arrives after Speak")
   }
 
   // ---- Toolbar: one compact row of icon + label pills along the bottom edge ----
@@ -146,37 +163,55 @@ export class RuleShiftControls extends BaseScriptComponent {
       options.mode = AsrModule.AsrMode.HighAccuracy
       this.heard = ""
       options.onTranscriptionUpdateEvent.add((e: any) => {
-        print("RULESHIFT ASR transcript: '" + e.text + "' final=" + e.isFinal)
+        this.asrEvents++
+        this.asrLastEventAt = getTime()
+        this.asrSilenceLogged = false
+        print("RULESHIFT ASR " + (e.isFinal ? "FINAL" : "partial") + " #" + this.asrEvents + " t+" + (getTime() - this.asrStartedAt).toFixed(1) + "s: '" + e.text + "'")
         if (!this.listening) return
         this.heard = e.text
         this.showCaption(e.text, 8)
         if (e.isFinal) this.finishSpeech()
       })
       options.onTranscriptionErrorEvent.add((code: any) => {
-        print("RULESHIFT ASR error: " + code)
+        print("RULESHIFT ASR onError: code=" + code + " (" + this.asrCodeName(code) + ") typeof=" + typeof code + " raw=" + JSON.stringify(code))
         if (this.listening) {
           this.setListening(false)
           this.showCaption("Voice unavailable (error " + code + ")", 3)
         }
       })
+      print("RULESHIFT ASR starting: mode=HighAccuracy silenceUntilTerminationMs=" + options.silenceUntilTerminationMs)
+      this.asrStartedAt = getTime()
+      this.asrLastEventAt = this.asrStartedAt
+      this.asrSilenceLogged = false
+      this.asrEvents = 0
       this.asrModule.startTranscribing(options)
       this.setListening(true)
       this.showCaption("Listening… describe an object", 8)
-      print("RULESHIFT ASR session started")
+      print("RULESHIFT ASR session started (startTranscribing returned without throwing)")
     } catch (e) {
-      print("RULESHIFT ASR start failed: " + e)
+      print("RULESHIFT ASR start failed (exception): " + e)
       this.setListening(false)
       this.showCaption("Voice unavailable", 3)
     }
   }
 
+  private asrCodeName(code: any): string {
+    try {
+      const S = (AsrModule as any).AsrStatusCode
+      for (const k in S) if (S[k] === code) return k
+    } catch (e) {}
+    return "unknown"
+  }
+
   private finishSpeech() {
     if (!this.listening) return
+    print("RULESHIFT ASR finishing: events=" + this.asrEvents + " heard='" + this.heard + "'")
     this.setListening(false)
     try {
       this.asrModule.stopTranscribing()
+      print("RULESHIFT ASR session stopped")
     } catch (e) {
-      print("RULESHIFT ASR stop: " + e)
+      print("RULESHIFT ASR stop failed: " + e)
     }
     this.handleTranscript(this.heard)
   }
