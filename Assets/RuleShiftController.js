@@ -215,6 +215,7 @@ function spawnNode(opts) {
     if (opts.glow) { addGlow(n); }
     pendingBinds.push({ kind: "node", n: n });
     pendingPlace = n;
+    updateEmptyHint();
     print("RULESHIFT spawned " + obj.name + " (" + nodes.length + "/" + MAX_NODES + ")");
     return n;
 }
@@ -229,20 +230,26 @@ function deleteNode(n) {
     if (pendingPlace === n) { pendingPlace = null; }
     nodes.splice(i, 1);
     n.obj.destroy();
-    refreshConnections();
+    refreshConnections(); updateEmptyHint();
     print("RULESHIFT deleted " + nm + " (" + nodes.length + " left)");
     return true;
 }
 
 // ---------- Placement: a pinch on a surface puts the newest object there ----------
 // Surfaces: a virtual table plane (always available), with WorldQuery tried first when it returns hits.
-var TABLE_Y = -14;               // virtual table surface, just above the control buttons
+var TABLE_Y = -19;               // virtual table surface: the stage rests on the Sunlit Room table (placed by eye; WorldQuery returns no hits in Preview)
 var pendingPlace = null;         // the newest spawned object waits for a pinch to be placed
 var hintObj = null, hintText = null;
 (function () {
     var h = makeText("Place Hint", 80, new vec3(0, 26, WORLD_Z), new vec4(0.75, 1, 0.85, 1));
     hintObj = h.obj; hintText = h.text; hintText.text = "Pinch a surface to place it"; hintObj.enabled = false;
 })();
+var emptyHint = null;
+(function () {
+    emptyHint = makeText("Empty Hint", 85, new vec3(0, 2, WORLD_Z), new vec4(0.85, 0.95, 1, 1)).obj;
+    emptyHint.getComponent("Component.Text").text = "Tap + Create to make your first object";
+})();
+function updateEmptyHint() { if (emptyHint) { emptyHint.enabled = nodes.length === 0; } }
 var wqSession = null, wqStatus = "untested";
 function initWorldQuery() {
     try {
@@ -555,7 +562,7 @@ function updateGoal(dt) {
     }
 }
 var STAGE_R = 23;
-var BOX_X = 17, BOX_YMIN = -11, BOX_YMAX = 10, BOX_Z = 10;   // keeps objects above the buttons and inside the view
+var BOX_X = 17, BOX_YMIN = -16, BOX_YMAX = 8, BOX_Z = 10;   // keeps objects above the buttons and inside the view
 function clampToBox(n, p) {
     var lx = Math.min(BOX_X, STAGE_R - n.radius);   // big objects stop at the stage rim
     return new vec3(Math.max(-lx, Math.min(lx, p.x)),
@@ -643,7 +650,7 @@ function resetWorld() {   // restores positions; created objects and links are k
 function clearAll() {
     for (var k = slots.length - 1; k >= 0; k--) { destroySlot(slots[k]); }
     for (var i = nodes.length - 1; i >= 0; i--) { nodes[i].obj.destroy(); }
-    nodes.length = 0; refreshConnections();
+    nodes.length = 0; refreshConnections(); updateEmptyHint();
     selNode = null; pendingPlace = null; setGoalEnabled(false);
     setState("creation");
     print("RULESHIFT cleared all");
@@ -716,7 +723,7 @@ script.api.test = {   // read/write hooks for RuleShiftTests.js
     clearLinks: clearLinks, selected: function () { return selNode ? nodeIndex(selNode) : -1; }, setRule: setRule, cycleRule: cycleRule,
     pendingBinds: function () { return pendingBinds.length; },
     deleteNode: function (i) { return deleteNode(nodes[i]); },
-    box: { x: BOX_X, yMin: BOX_YMIN, yMax: BOX_YMAX, zr: BOX_Z, buttonTop: -16 },
+    box: { x: BOX_X, yMin: BOX_YMIN, yMax: BOX_YMAX, zr: BOX_Z, buttonTop: -21 },
     goalStage: function () { return goalStage; },
     frames: function () { return frameCount; },
     linkColor: function (c) { var k = c.rmv.mainPass.baseColor; return k.r.toFixed(2) + "," + k.g.toFixed(2) + "," + k.b.toFixed(2); },
@@ -798,7 +805,7 @@ script.createEvent("OnStartEvent").bind(function () {
         return buildMesh(T);
     }
     var layers = [   // [inner, outer, brightness]: stacked additive layers give a soft falloff towards a brighter rim
-        [0, 1.0, 0.07], [0, 0.82, 0.07], [0, 0.6, 0.07], [0.955, 1.0, 0.6], [0.9, 1.0, 0.2]
+        [0, 1.0, 0.11], [0, 0.82, 0.10], [0, 0.6, 0.10], [0, 0.35, 0.08], [0.66, 0.675, 0.22], [0.33, 0.345, 0.22], [0.955, 1.0, 0.6], [0.9, 1.0, 0.2]
     ];
     layers.forEach(function (L, li) {
         var o = global.scene.createSceneObject("Stage " + li);

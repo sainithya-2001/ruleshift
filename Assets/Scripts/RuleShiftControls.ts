@@ -65,11 +65,11 @@ export class RuleShiftControls extends BaseScriptComponent {
   // ---- Toolbar: one compact row of icon + label pills along the bottom edge ----
   private buildToolbar() {
     const api = this.controller.api
-    const h = 4.2
-    const labels = ["Activate", "Reset", "+ Create", "Clear links", "Clear all"]
+    const h = 6.3
+    const labels = ["Activate", "Reset", "Create", "Clear links", "Clear all"]
     const icons = [this.iconPlay, this.iconReset, this.iconAdd, this.iconClose, this.iconTrash]
-    let widths = [11.5, 8.6, 10.2, 11.8, 10.2]
-    const gap = 0.8
+    let widths = [10.4, 8.8, 9.6, 12.4, 10.8]
+    const gap = 0.6
     const total = widths.reduce((a, b) => a + b, 0) + gap * 4
     const k = Math.min(1, (this.halfW * 2 - 3) / total)
     widths = widths.map((w) => w * k)
@@ -80,7 +80,7 @@ export class RuleShiftControls extends BaseScriptComponent {
     labels.forEach((label, i) => {
       const cx = x + widths[i] / 2
       api.makePlate("Pill " + label, widths[i], h, 0.4, new vec3(cx, y, Z - 0.8), PILL, -7)
-      pills.push(this.makePill(this.sceneObject, "Pill" + i, label, icons[i], new vec3(cx, y, Z + 0.5), new vec2(widths[i], h), 48))
+      pills.push(this.makePill(this.sceneObject, "Pill" + i, label, icons[i], new vec3(cx, y, Z + 0.5), new vec2(widths[i], h), 54, false, 3))
       x += widths[i] + gap * k
     })
     this.mainPill = pills[0]
@@ -202,7 +202,7 @@ export class RuleShiftControls extends BaseScriptComponent {
     this.deletePlate.getTransform().setWorldPosition(new vec3(nearer.x, nearer.y, nearer.z - 0.6))
   }
 
-  private makePill(parent: SceneObject, name: string, label: string, icon: Texture | null, pos: vec3, size: vec2, textSize: number, local = false): Pill {
+  private makePill(parent: SceneObject, name: string, label: string, icon: Texture | null, pos: vec3, size: vec2, textSize: number, local = false, iconSize = 2.2): Pill {
     const so = global.scene.createSceneObject(name)
     so.setParent(parent)
     if (local) so.getTransform().setLocalPosition(pos)
@@ -211,9 +211,10 @@ export class RuleShiftControls extends BaseScriptComponent {
     const content = so.createComponent(ElementContent.getTypeName()) as ElementContent
     content.text = label
     content.textSize = textSize
+    ;(content as any)._useThemeColors = false // bright white labels (the theme's grey reads dim on the additive display)
     if (icon) {
       content.leadingIcon = icon
-      content.leadingIconSize = Math.min(size.y * 0.55, 2.2)
+      content.leadingIconSize = Math.min(size.y * 0.55, iconSize)
     }
     button.onInitialized.add(() => {
       button.size = new vec3(size.x, size.y, 1)
