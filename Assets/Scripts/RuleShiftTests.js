@@ -183,7 +183,7 @@ if (script.runTests) {
         // glow: layered translucent additive shells
         var gi = api.spawn({ shape: "sphere", glow: true, color: [0, 0.85, 1] }); yield 0.1;
         var gl = T.glowInfo(gi);
-        check("11 Glow: 2 shells, additive blend, translucent", gl.length === 2 && gl.every(function (g) { return g.blend === BlendMode.Add && g.alpha < 1; }), JSON.stringify(gl));
+        check("11 Glow: 3 soft round halos, additive blend, very transparent", gl.length === 3 && gl.every(function (g) { return g.blend === BlendMode.Add && g.alpha <= 0.2; }), JSON.stringify(gl));
         var ng = api.spawn({ shape: "cube", glow: false }); yield 0.1;
         check("11 No glow: no shells", T.glowInfo(ng).length === 0);
         api.clearAll(); yield 0.1;

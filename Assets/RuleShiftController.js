@@ -135,7 +135,7 @@ function toColor(c) {
 }
 function findFreeSpot(radius) {
     var best = new vec3(0, -2, WORLD_Z);
-    for (var k = 0; k < 60; k++) {
+    for (var k = 0; k < (nodes.length < 3 ? 60 : 0); k++) {   // spiral keeps the first few near the centre; later ones are packed on a grid
         var ang = k * 2.39996, rad = k === 0 ? 0 : 3 + k * 0.45;
         var p = new vec3(Math.cos(ang) * rad * 1.1, -2 + Math.sin(ang) * rad * 0.7, WORLD_Z);
         p = new vec3(Math.max(-BOX_X + radius, Math.min(BOX_X - radius, p.x)), Math.max(BOX_YMIN + radius, Math.min(BOX_YMAX - radius, p.y)), WORLD_Z);
@@ -143,20 +143,28 @@ function findFreeSpot(radius) {
         if (free) { return p; }
         best = p;
     }
+    // spiral found nothing: scan the whole box on a fine grid for any free spot
+    var x0 = -BOX_X + radius, x1 = BOX_X - radius, y0 = BOX_YMIN + radius, y1 = BOX_YMAX - radius;
+    for (var gy = y0; gy <= y1 + 0.001; gy += 0.5) {
+        for (var gx = x0; gx <= x1 + 0.001; gx += 0.5) {
+            var q = new vec3(gx, gy, WORLD_Z);
+            if (nodes.every(function (n) { return n.pos.distance(q) >= n.radius + radius + 0.1; })) { return q; }
+        }
+    }
     return best;
 }
-function addGlow(n, size) {
-    // two layered translucent additive shells around the object read as a soft halo on an additive display
+function addGlow(n) {
+    // soft round halo: three nested, very transparent additive spheres (never a scaled copy of the shape, which reads as an outline)
     n.glow = [];
-    [[1.3, 0.55], [1.7, 0.28]].forEach(function (L, li) {
+    [[2.2, 0.05], [1.75, 0.10], [1.35, 0.18]].forEach(function (L, li) {
         var o = global.scene.createSceneObject("Glow " + li);
         o.setParent(n.obj); o.layer = n.obj.layer;
         var v = o.createComponent("Component.RenderMeshVisual");
-        v.mesh = n.fullMesh; v.mainMaterial = SPHERE_MAT.clone();
+        v.mesh = SPHERE_MESH; v.mainMaterial = SPHERE_MAT.clone();
         var p = v.mainPass;
         p.blendMode = BlendMode.Add; p.depthWrite = false;
         p.baseColor = new vec4(n.color.r * L[1], n.color.g * L[1], n.color.b * L[1], L[1]);
-        v.setRenderOrder(5 + li);
+        v.setRenderOrder(-3 + li);   // drawn before the object so it only shows around it
         o.getTransform().setLocalScale(vec3.one().uniformScale(L[0]));
         n.glow.push(o);
     });
@@ -258,7 +266,8 @@ function worldDepthHit(o, d) {   // fallback: where the ray crosses the world's 
 }
 function placeNodeAt(n, hit, via) {
     var onTable = via === "plane";
-    var p = new vec3(Math.max(-BOX_X, Math.min(BOX_X, hit.x)),
+    var lx = Math.min(BOX_X, STAGE_R - n.radius);
+    var p = new vec3(Math.max(-lx, Math.min(lx, hit.x)),
         onTable ? TABLE_Y + n.radius : hit.y,
         Math.max(WORLD_Z - BOX_Z, Math.min(WORLD_Z + BOX_Z, hit.z)));
     p = new vec3(p.x, Math.max(BOX_YMIN, Math.min(BOX_YMAX, p.y)), p.z);
@@ -545,9 +554,11 @@ function updateGoal(dt) {
         if (settleTime > 1.5) { goalStage = 3; startGoalPulse(); goalText.text = "Triangle! Rule rewritten! ✨"; print("RULESHIFT goal 2 complete"); }
     }
 }
-var BOX_X = 19, BOX_YMIN = -11, BOX_YMAX = 10, BOX_Z = 10;   // keeps objects above the buttons and inside the view
+var STAGE_R = 23;
+var BOX_X = 17, BOX_YMIN = -11, BOX_YMAX = 10, BOX_Z = 10;   // keeps objects above the buttons and inside the view
 function clampToBox(n, p) {
-    return new vec3(Math.max(-BOX_X, Math.min(BOX_X, p.x)),
+    var lx = Math.min(BOX_X, STAGE_R - n.radius);   // big objects stop at the stage rim
+    return new vec3(Math.max(-lx, Math.min(lx, p.x)),
         Math.max(BOX_YMIN, Math.min(BOX_YMAX, p.y)),
         Math.max(n.initial.z - BOX_Z, Math.min(n.initial.z + BOX_Z, p.z)));
 }
@@ -639,8 +650,8 @@ function clearAll() {
 }
 function loadDemo() {   // the starting set used for the video: pink, cyan, yellow spheres; pink-cyan attract, cyan-yellow repel
     clearAll();
-    var a = spawnNode({ shape: "sphere", color: NODE_COLORS[0], size: 10, accel: 1, rest: 0, pos: new vec3(-12, -11, WORLD_Z), name: "Sphere A" });
-    var b = spawnNode({ shape: "sphere", color: NODE_COLORS[1], size: 10, accel: 1, rest: 0, pos: new vec3(12, -11, WORLD_Z), name: "Sphere B" });
+    var a = spawnNode({ shape: "sphere", color: NODE_COLORS[0], size: 10, accel: 1, rest: 0, pos: new vec3(-12, -9, WORLD_Z), name: "Sphere A" });
+    var b = spawnNode({ shape: "sphere", color: NODE_COLORS[1], size: 10, accel: 1, rest: 0, pos: new vec3(12, -9, WORLD_Z), name: "Sphere B" });
     var c = spawnNode({ shape: "sphere", color: NODE_COLORS[2], size: 10, accel: 1, rest: 0, pos: new vec3(0, 4, WORLD_Z), name: "Sphere C" });
     var ab = slotFor(a, b, true), bc = slotFor(b, c, true); slotFor(a, c, true);   // slot order AB, BC, AC
     activateLink(ab, RULES.ATTRACT, true); activateLink(bc, RULES.REPEL, true);
@@ -674,10 +685,11 @@ script.api.selectedInfo = function () {
     return { x: selNode.pos.x, y: selNode.pos.y, z: selNode.pos.z, r: selNode.radius };
 };
 // UI helpers for the palette (TypeScript side): an opaque plate and a round colour swatch, built from the shared meshes.
-script.api.makePlate = function (name, w, h, d, pos, col) {
+script.api.makePlate = function (name, w, h, d, pos, col, order) {
     var o = global.scene.createSceneObject(name);
     var v = o.createComponent("Component.RenderMeshVisual");
     v.mesh = LINK_MESH; v.mainMaterial = SPHERE_MAT.clone(); v.mainPass.baseColor = col;
+    if (order !== undefined) { v.mainPass.depthTest = false; v.setRenderOrder(order); }   // drawn beneath the UI buttons regardless of depth
     var mn = LINK_MESH.aabbMin, mx = LINK_MESH.aabbMax;
     var mw = Math.max(mx.x - mn.x, 0.0001), ml = Math.max(mx.y - mn.y, 0.0001), md = Math.max(mx.z - mn.z, 0.0001);
     var t = o.getTransform();
@@ -772,19 +784,34 @@ script.createEvent("OnStartEvent").bind(function () {
     wqDelay.reset(2);
 });
 
-var CTRL_Y = -22;
-// Opaque violet backing so the button labels read on any background.
-try {
-    var plate = global.scene.createSceneObject("Controls Backing");
-    var prmv = plate.createComponent("Component.RenderMeshVisual");
-    prmv.mesh = LINK_MESH; prmv.mainMaterial = SPHERE_MAT.clone();
-    prmv.mainPass.baseColor = new vec4(0.3, 0.12, 0.6, 1);
-    var pt = plate.getTransform();
-    var bw = 54, bh = 17, bd = 0.4;
-    var mnb = LINK_MESH.aabbMin, mxb = LINK_MESH.aabbMax;
-    var mW0 = Math.max(mxb.x - mnb.x, 0.0001), mL0 = Math.max(mxb.y - mnb.y, 0.0001), mD0 = Math.max(mxb.z - mnb.z, 0.0001);
-    pt.setWorldScale(new vec3(bw / mW0, bh / mL0, bd / mD0));
-    pt.setWorldRotation(quat.fromEulerAngles(0, 0, Math.PI / 2));   // mesh long axis is Y; lay it along X
-    pt.setWorldScale(new vec3(bh / mW0, bw / mL0, bd / mD0));
-    pt.setWorldPosition(new vec3(0, CTRL_Y - 2.5, WORLD_Z - 1));
-} catch (err) { print("RULESHIFT backing failed: " + err); }
+// ---------- Stage: a thin glowing disc under the world = placement surface and world bounds ----------
+(function () {
+    var SEG = 64;
+    function ring(r0, r1) {
+        var T = [], i;
+        for (i = 0; i < SEG; i++) {
+            var a0 = i / SEG * Math.PI * 2, a1 = (i + 1) / SEG * Math.PI * 2;
+            var o0 = [Math.cos(a0) * r1, 0, Math.sin(a0) * r1], o1 = [Math.cos(a1) * r1, 0, Math.sin(a1) * r1];
+            var i0 = [Math.cos(a0) * r0, 0, Math.sin(a0) * r0], i1 = [Math.cos(a1) * r0, 0, Math.sin(a1) * r0];
+            if (r0 <= 0) { tri(T, [0, 0, 0], o1, o0, [0, -1, 0]); } else { tri(T, i0, o1, o0, [0, -1, 0]); tri(T, i0, i1, o1, [0, -1, 0]); }
+        }
+        return buildMesh(T);
+    }
+    var layers = [   // [inner, outer, brightness]: stacked additive layers give a soft falloff towards a brighter rim
+        [0, 1.0, 0.07], [0, 0.82, 0.07], [0, 0.6, 0.07], [0.955, 1.0, 0.6], [0.9, 1.0, 0.2]
+    ];
+    layers.forEach(function (L, li) {
+        var o = global.scene.createSceneObject("Stage " + li);
+        var v = o.createComponent("Component.RenderMeshVisual");
+        v.mesh = ring(L[0], 1); v.mainMaterial = SPHERE_MAT.clone();
+        var p = v.mainPass; p.blendMode = BlendMode.Add; p.depthWrite = false;
+        p.baseColor = new vec4(0.35 * L[2], 0.7 * L[2], 1.0 * L[2], L[2]);
+        v.setRenderOrder(-10 + li);
+        o.getTransform().setWorldPosition(new vec3(0, TABLE_Y, WORLD_Z));
+        o.getTransform().setLocalScale(vec3.one().uniformScale(STAGE_R));
+    });
+})();
+script.api.view = function () {   // visible half-extents (cm) at the world's depth, for placing UI at the edges
+    var c = script.camera, hh = Math.tan(c.fov / 2) * Math.abs(WORLD_Z);
+    return { halfW: hh * c.aspect, halfH: hh, stageR: STAGE_R };
+};

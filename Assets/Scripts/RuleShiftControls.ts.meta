@@ -28,9 +28,13 @@
   ExportUid: 00000000-0000-0000-0000-000000000000
   PackagePolicy: CanBeUnpacked
   ScriptInputsHidden:
-    buttonSize: false
     controller: false
-    gap: false
+    iconAdd: false
+    iconClose: false
+    iconPause: false
+    iconPlay: false
+    iconReset: false
+    iconTrash: false
   ScriptTypesHidden:
     {}
   ReadMe: !<reference> 00000000-0000-0000-0000-000000000000
@@ -41,12 +45,20 @@
     []
   DefaultScriptInputs:
     - controller: !<reference.ScriptComponent> 00000000-0000-0000-0000-000000000000
-      buttonSize: !<Vec2> {x: 13.000000, y: 5.000000}
-      gap: !<float> 2.000000
+      iconPlay: !<reference.Texture> 00000000-0000-0000-0000-000000000000
+      iconPause: !<reference.Texture> 00000000-0000-0000-0000-000000000000
+      iconReset: !<reference.Texture> 00000000-0000-0000-0000-000000000000
+      iconAdd: !<reference.Texture> 00000000-0000-0000-0000-000000000000
+      iconClose: !<reference.Texture> 00000000-0000-0000-0000-000000000000
+      iconTrash: !<reference.Texture> 00000000-0000-0000-0000-000000000000
   ScriptTypes:
     -
       {}
   InputLines:
     - '// @input Component.ScriptComponent controller {"hint":"RuleShiftController script (JS) exposing script.api"}'
-    - '// @input vec2 buttonSize = {24,9} {"hint":"Button width/height in cm"}'
-    - '// @input float gap = 3 {"hint":"Horizontal gap between buttons in cm"}'
+    - // @input Asset.Texture iconPlay
+    - // @input Asset.Texture iconPause
+    - // @input Asset.Texture iconReset
+    - // @input Asset.Texture iconAdd
+    - // @input Asset.Texture iconClose
+    - // @input Asset.Texture iconTrash

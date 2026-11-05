@@ -2004,8 +2004,12 @@
   ScriptInputs:
     "":
       controller: !<reference.ScriptComponent> 4aef1a10-019c-4696-a7b1-b4bd90edb0eb
-      buttonSize: !<Vec2> {x: 24.000000, y: 9.000000}
-      gap: !<float> 3.000000
+      iconPlay: !<reference.Texture> a9c0060e-b208-468b-98d1-45c3fd3fa1da
+      iconPause: !<reference.Texture> ce968c0a-c40b-4944-8551-0db73e069849
+      iconReset: !<reference.Texture> d163b2d5-abaf-4681-a0e7-6ca10679087b
+      iconAdd: !<reference.Texture> fa8784e1-392b-4a05-a6cc-55cb2dca36d1
+      iconClose: !<reference.Texture> 14ce1f8d-2a45-40bc-8933-110c2a45c082
+      iconTrash: !<reference.Texture> 8a22d2a7-4fe9-4a15-bdaf-c9b834f1f73e
   ScriptTypes:
     "":
       {}
