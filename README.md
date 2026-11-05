@@ -32,6 +32,7 @@ On the **RULESHIFT Controller** scene object:
 
 - `demoPreset` (off by default): when on, the Lens opens on an empty stage with no hints, ready to record.
 - `demoStage` (only read when `demoPreset` is on): set it to `chain` to open with a gem, an orb and a cube spread across the stage. The gem and orb are linked with **Attract** and the orb and cube with **On Collision**. Press Play: the orb is pulled toward the gem, bumps the cube, a pulse runs down the gem-orb link, and that link flips to **Repel**.
+- `lightFx` (off by default, recording only): uses one halo layer instead of three and a one-sphere pulse trail, to save frames in Preview while recording. Set it before running; it is read at startup.
 
 ## Optional: Snap3D token (Surprise me and voice-to-3D)
 
@@ -52,7 +53,7 @@ Generation uses the Remote Service Gateway package and a Snap API token. Without
 - **Voice is device-only.** Lens Studio's Preview cannot provide microphone speech recognition, so voice creation was written against the ASR API but could not be exercised in Preview.
 - **Tested in Preview only.** Nothing has been run on Spectacles hardware, so comfort, hand tracking feel and on-device frame rate are unproven.
 - **Harmless log line without a token:** `Failed to resolve dependency ./snapTokenLocal` appears once at startup when `snapTokenLocal.ts` is absent. The Lens catches it and carries on with an empty token.
-- Preview ran at roughly 8-17 fps on our machine (even with an empty stage), below the 24 fps we would want. Physics steps are clamped, so motion looks slower there than it will on a device.
+- Preview ran at roughly 8-17 fps on our machine (even with an empty stage), below the 24 fps we would want. Physics uses real elapsed time split into 0.02 s substeps (at most 6 per frame), so motion keeps real-time speed above about 8 fps and slows down only below that.
 - Up to 8 objects. The rule system is deliberately small: three rules, no user-programmed physics.
 - Generated models are fitted to a fixed stage footprint, so their on-stage size reflects the footprint rather than the prompt.
 

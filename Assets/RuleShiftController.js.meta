@@ -33,6 +33,7 @@
     demoPreset: false
     demoStage: false
     imagineMaterial: false
+    lightFx: false
     linkTemplate: false
     nodeTemplate: false
     strength: false
@@ -51,6 +52,7 @@
       debugAutoToggle: true
       demoPreset: false
       demoStage: ""
+      lightFx: false
       camera: !<reference.Camera> 00000000-0000-0000-0000-000000000000
       imagineMaterial: !<reference.Material> 00000000-0000-0000-0000-000000000000
   ScriptTypes:

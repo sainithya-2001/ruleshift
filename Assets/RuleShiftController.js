@@ -4,6 +4,7 @@
 // @input bool debugAutoToggle = false
 // @input bool demoPreset = false
 // @input string demoStage = ""
+// @input bool lightFx = false
 // @input Component.Camera camera
 // @input Asset.Material imagineMaterial
 
@@ -159,7 +160,7 @@ function glowBoost(n) { return n.shape === "sphere" ? 1 : 1.8; }   // slimmer si
 function addGlow(n) {
     // soft round halo: three nested, very transparent additive spheres (never a scaled copy of the shape, which reads as an outline)
     n.glow = [];
-    [[2.2, 0.05], [1.75, 0.10], [1.35, 0.18]].forEach(function (L, li) {
+    (script.lightFx ? [[1.7, 0.16]] : [[2.2, 0.05], [1.75, 0.10], [1.35, 0.18]]).forEach(function (L, li) {
         var o = global.scene.createSceneObject("Glow " + li);
         o.setParent(n.obj); o.layer = n.obj.layer;
         var v = o.createComponent("Component.RenderMeshVisual");
@@ -486,6 +487,7 @@ function checkCollisions() {
 var CAUSE_TIME = 0.5, TAP_PULSE_TIME = 0.3, FLASH_TIME = 0.35, CAUSE_POOL = 12;
 var CAUSE_SIZES = [3.8, 3.1, 2.4, 1.7], CAUSE_ALPHA = [1, 0.6, 0.35, 0.18], CAUSE_LAG = 0.07;
 var WHITE4 = new vec4(1, 1, 1, 1);
+var PULSE_PARTS = script.lightFx ? 2 : CAUSE_SIZES.length;   // lightFx (recording only): head plus a 1-sphere trail
 var SPHERE_D = Math.max(SPHERE_MESH.aabbMax.x - SPHERE_MESH.aabbMin.x, 0.0001);
 var causePool = [], causeActive = [], realDt = 0.016;
 function makeCausePulse() {
@@ -495,7 +497,7 @@ function makeCausePulse() {
     root.layer = NODE_TMPL.layer;
     root.enabled = false;
     var p = { root: root, parts: [], busy: false, c: null };
-    for (var i = 0; i < CAUSE_SIZES.length; i++) {
+    for (var i = 0; i < PULSE_PARTS; i++) {
         var o = global.scene.createSceneObject("Pulse " + i);
         o.setParent(root); o.layer = root.layer;
         var v = o.createComponent("Component.RenderMeshVisual");
@@ -796,9 +798,9 @@ function loadDemo() {   // the starting set used for the video: pink, cyan, yell
 // a pulse runs down the gem-orb link and flips it to REPEL). Press Play to start it.
 function loadChain() {
     clearAll();
-    var gem = spawnNode({ shape: "crystal", color: NODE_COLORS[0], size: 10, glow: true, weight: "heavy", pos: new vec3(12, -4, WORLD_Z), name: "Gem" });
-    var orb = spawnNode({ shape: "sphere", color: NODE_COLORS[1], size: 10, weight: "light", pos: new vec3(-12, -4, WORLD_Z), name: "Orb" });
-    var cube = spawnNode({ shape: "cube", color: NODE_COLORS[2], size: 14, pos: new vec3(-2, 6, WORLD_Z), name: "Cube" });
+    var gem = spawnNode({ shape: "crystal", color: NODE_COLORS[0], size: 10, glow: true, weight: "heavy", pos: new vec3(13, 4, WORLD_Z), name: "Gem" });
+    var orb = spawnNode({ shape: "sphere", color: NODE_COLORS[1], size: 10, weight: "light", pos: new vec3(-13, 4, WORLD_Z), name: "Orb" });
+    var cube = spawnNode({ shape: "cube", color: NODE_COLORS[2], size: 10, pos: new vec3(-2, -4, WORLD_Z), name: "Cube" });
     activateLink(slotFor(gem, orb, true), RULES.ATTRACT, true);
     activateLink(slotFor(orb, cube, true), RULES.COLLISION_TRIGGER, true);
     pendingPlace = null;   // everything is already placed: no placement hint
@@ -859,7 +861,8 @@ script.api.makeSwatch = function (parent, col, size, z) {
     return o;
 };
 var frameCount = 0;
-script.api.test = {   // read/write hooks for RuleShiftTests.js
+script.api.test = {
+    setFixedStep: function (s) { fixedStep = s; },   // read/write hooks for RuleShiftTests.js
     nodes: nodes, connections: connections, slots: slots,
     tap: function (i) { handleTapNode(nodes[i]); },
     pressStart: function (i) { pressStartNode(nodes[i]); },
@@ -889,6 +892,7 @@ script.api.test = {   // read/write hooks for RuleShiftTests.js
     glowInfo: function (i) { var n = nodes[i]; return n.glow.map(function (o) { var p = o.getComponent("Component.RenderMeshVisual").mainPass; return { blend: p.blendMode, alpha: p.baseColor.a }; }); }
 };
 
+var SUBSTEP = 0.02, MAX_SUBSTEPS = 6, fixedStep = 0;   // fixedStep > 0 (tests only) replaces real dt with a constant step
 var elapsed = 0, lastToggle = 0;
 script.createEvent("UpdateEvent").bind(function (e) {
     var dt = Math.min(e.getDeltaTime(), 0.05);
@@ -920,9 +924,14 @@ script.createEvent("UpdateEvent").bind(function (e) {
         cycleRule(connections[0], "auto");
     }
     syncDragged();
-    if (state === "live") {
-        computeForces();
-        integrate(dt);
+    if (state === "live") {   // real elapsed time, split into fixed substeps so motion keeps real-time speed at low fps without going unstable
+        var total = fixedStep > 0 ? fixedStep : Math.min(e.getDeltaTime(), MAX_SUBSTEPS * SUBSTEP);
+        var steps = Math.max(1, Math.min(MAX_SUBSTEPS, Math.ceil(total / SUBSTEP - 1e-6)));
+        lastDt = total;
+        for (var si = 0; si < steps; si++) {
+            computeForces();
+            integrate(total / steps);
+        }
     }
     for (var it = 0; it < 6; it++) {   // push apart, then re-clamp so a shove can never leave the box
         resolveOverlaps(it >= 2);
