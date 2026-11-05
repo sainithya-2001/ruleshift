@@ -220,6 +220,10 @@ export class RuleShiftControls extends BaseScriptComponent {
     const api = this.controller.api
     const p = api.parseVoice(text)
     print("RULESHIFT voice '" + text + "' -> " + JSON.stringify(p))
+    if (!text || text.trim().length === 0) {
+      this.showCaption("Didn't catch that, try again", 3)
+      return
+    }
     if (!p.found) {
       this.showCaption("Try: 'a glowing blue ring'", 3)
       return
