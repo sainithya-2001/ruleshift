@@ -9,11 +9,11 @@ export class RuleShiftControls extends BaseScriptComponent {
 
   @input
   @hint("Button width/height in cm")
-  buttonSize: vec2 = new vec2(16, 6)
+  buttonSize: vec2 = new vec2(24, 9)
 
   @input
   @hint("Horizontal gap between buttons in cm")
-  gap: number = 2
+  gap: number = 3
 
   private mainContent: ElementContent
   private lastState: string = ""
@@ -46,7 +46,7 @@ export class RuleShiftControls extends BaseScriptComponent {
     const button = so.createComponent(Button.getTypeName()) as Button
     const content = so.createComponent(ElementContent.getTypeName()) as ElementContent
     content.text = label
-    content.textSize = 62
+    content.textSize = 110
     button.onInitialized.add(() => {
       button.size = new vec3(this.buttonSize.x, this.buttonSize.y, 1)
     })

@@ -19,7 +19,7 @@ var RULE_COLOR = {
     COLLISION_TRIGGER: new vec4(0.8, 0.3, 1.0, 1) // violet
 };
 
-var NODE_COLORS = [new vec4(1.0, 0.25, 0.6, 1), new vec4(0.2, 1.0, 0.8, 1), new vec4(1.0, 0.9, 0.2, 1)]; // pink, mint, sun
+var NODE_COLORS = [new vec4(1.0, 0.0, 0.35, 1), new vec4(0.0, 0.85, 1.0, 1), new vec4(1.0, 0.9, 0.0, 1)]; // hot pink, electric cyan, vivid yellow
 var nodes = [];      // {obj, tr, pos:vec3, vel:vec3, force:vec3, initial:vec3}
 var connections = []; // {a, b, rule, visual, baseScaleY, baseDist}
 
@@ -29,7 +29,8 @@ function meshRadius(obj) {
     if (r && r.mesh) { return (r.mesh.aabbMax.x - r.mesh.aabbMin.x) / 2 * s.x; }
     return s.x / 2;
 }
-var USE_EMISSIVE = true;
+var USE_EMISSIVE = false;   // PBR white base texture washed colours to pastel; use the flat baseColor material instead
+var SPHERE_MAT = script.connAB.getComponent("Component.RenderMeshVisual").mainMaterial;
 function setNodeColor(rmv, col) {   // PBR sphere mat has no colour param; Port_Emissive_N006 is the tintable one
     if (USE_EMISSIVE) { rmv.mainPass.Port_Emissive_N006 = new vec3(col.r, col.g, col.b); }
     else { rmv.mainPass.baseColor = col; }
@@ -38,7 +39,7 @@ function addNode(obj) {
     if (!obj) { return -1; }
     var nrmv = obj.getComponent("Component.RenderMeshVisual");
     var col = NODE_COLORS[nodes.length % NODE_COLORS.length];
-    if (nrmv) { nrmv.mainMaterial = nrmv.mainMaterial.clone(); setNodeColor(nrmv, col); }
+    if (nrmv) { nrmv.mainMaterial = SPHERE_MAT.clone(); setNodeColor(nrmv, col); }
     var tr = obj.getTransform();
     var p = tr.getLocalPosition();
     nodes.push({ obj: obj, tr: tr, pos: new vec3(p.x, p.y, p.z), vel: vec3.zero(),
@@ -46,7 +47,7 @@ function addNode(obj) {
         baseScale: obj.getTransform().getLocalScale(), pulse: -1, color: col, rmv: nrmv });
     return nodes.length - 1;
 }
-var LINK_THICKNESS = 1.3, HALO_SCALE = 1.7;
+var HALO_SCALE = 1.7;
 function applyColor(c) {
     if (c.rmv && c.rmv.mainPass) {
         c.rmv.mainPass.baseColor = RULE_COLOR[c.rule];
@@ -58,13 +59,27 @@ function addConnection(a, b, rule, visual) {
     var d = Math.max(nodes[a].pos.sub(nodes[b].pos).length, 0.1);
     var c = { a: a, b: b, rule: rule, visual: visual, rmv: visual.getComponent("Component.RenderMeshVisual"),
         cooldownUntil: 0, baseScaleY: visual.getTransform().getLocalScale().y, baseDist: d };
-    if (c.rmv) { c.rmv.mainMaterial = c.rmv.mainMaterial.clone(); }
-    var vs = visual.getTransform().getLocalScale();
-    c.thick = LINK_THICKNESS; c.pop = -1; c.baseScaleX = vs.x; c.baseScaleZ = vs.z;
+    // Parent keeps unit scale + the (invisible) collider; a child object carries the thin visible mesh.
+    var pmesh = c.rmv.mesh, pmat = c.rmv.mainMaterial;
+    c.rmv.enabled = false;
+    var vo = global.scene.createSceneObject("Link Visual");
+    vo.setParent(visual);
+    vo.layer = visual.layer;
+    c.rmv = vo.createComponent("Component.RenderMeshVisual");
+    c.rmv.mesh = pmesh; c.rmv.mainMaterial = pmat.clone();
+    c.visTr = vo.getTransform();
+    var mn = pmesh.aabbMin, mx = pmesh.aabbMax;
+    c.mW = Math.max(mx.x - mn.x, 0.0001); c.mL = Math.max(mx.y - mn.y, 0.0001); c.mD = Math.max(mx.z - mn.z, 0.0001);
+    c.mCenter = new vec3((mx.x + mn.x) / 2, (mx.y + mn.y) / 2, (mx.z + mn.z) / 2);
+    print("RULESHIFT link mesh aabb " + c.mW.toFixed(2) + "x" + c.mL.toFixed(2) + "x" + c.mD.toFixed(2));
+    visual.getTransform().setLocalScale(vec3.one());
+    c.collider = visual.getComponent("Component.ColliderComponent");
+    c.thickDiam = nodes[a].radius * 0.5;   // visible cylinder diameter = half the sphere radius (radius R/4)
+    c.pop = -1;
     connections.push(c);
     var lo = global.scene.createSceneObject("Rule Label " + connections.length);
     c.label = lo.createComponent("Component.Text");
-    c.label.size = 90; c.label.depthTest = true;
+    c.label.size = 110; c.label.depthTest = false;
     c.label.horizontalAlignment = HorizontalAlignment.Center;
     c.label.verticalAlignment = VerticalAlignment.Center;
     c.labelTr = lo.getTransform();
@@ -162,7 +177,9 @@ var LABEL_TEXT = { ATTRACT: "ATTRACT", REPEL: "REPEL", COLLISION_TRIGGER: "ON CO
 var labelAlpha = 1;
 function updateLabel(c) {
     var A = nodes[c.a].pos, B = nodes[c.b].pos;
-    c.labelTr.setWorldPosition(A.add(B).uniformScale(0.5).add(new vec3(0, 12, 18)));
+    var mid = A.add(B).uniformScale(0.5);
+    var toCam = mid.uniformScale(-1 / Math.max(mid.length, 0.01));   // camera is at the origin
+    c.labelTr.setWorldPosition(mid.add(toCam.uniformScale(22)).add(new vec3(0, 7, 0)));
     c.label.text = LABEL_TEXT[c.rule];
     var k = RULE_COLOR[c.rule];
     c.label.textFill.color = new vec4(k.r, k.g, k.b, labelAlpha);
@@ -171,14 +188,21 @@ function updateVisual(c) {
     var A = nodes[c.a].pos, B = nodes[c.b].pos;
     var delta = B.sub(A);
     var dist = Math.max(delta.length, 0.01);
+    var dir = delta.uniformScale(1 / dist);
     var tr = c.visual.getTransform();
     tr.setLocalPosition(A.add(B).uniformScale(0.5));
-    tr.setLocalRotation(quat.rotationFromTo(UP, delta.uniformScale(1 / dist)));
-    var s = tr.getLocalScale();
+    tr.setLocalRotation(quat.rotationFromTo(UP, dir));
     var pk = 0;
     if (c.pop >= 0) { c.pop += lastDt; pk = c.pop >= POP_TIME ? 0 : Math.sin(Math.PI * c.pop / POP_TIME); if (c.pop >= POP_TIME) { c.pop = -1; } }
-    var w = c.thick * (1 + 1.2 * pk);
-    tr.setLocalScale(new vec3(c.baseScaleX * w, c.baseScaleY * dist / c.baseDist, c.baseScaleZ * w));
+    var w = c.thickDiam * (1 + 1.2 * pk);
+    var sx = w / c.mW, sy = dist / c.mL, sz = w / c.mD;
+    c.visTr.setLocalScale(new vec3(sx, sy, sz));
+    c.visTr.setLocalPosition(new vec3(-c.mCenter.x * sx, -c.mCenter.y * sy, -c.mCenter.z * sz));
+    if (c.collider) {   // wide invisible tap target, shorter than the span so spheres stay grabbable
+        var sh = c.collider.shape;
+        sh.size = new vec3(6, Math.max(dist - nodes[c.a].radius - nodes[c.b].radius, 1), 6);
+        c.collider.shape = sh;
+    }
 }
 
 // Modes: creation (stationary, start) -> live <-> paused. Reset -> creation.
@@ -247,18 +271,19 @@ script.createEvent("OnStartEvent").bind(function () {
         }
     });
 });
-// Opaque violet backing so the button labels read on any background (a copy of the link box).
+var WORLD_Z = -95, CTRL_Y = -22;
+// Opaque violet backing so the button labels read on any background.
 try {
-    var plate = script.connAB.copyWholeHierarchy(script.connAB);
-    var pc = plate.getComponent("Component.ColliderComponent"); if (pc) { pc.destroy(); }
-    plate.name = "Controls Backing"; plate.setParent(null);
-    plate.getTransform().setWorldPosition(new vec3(0, -22, -80.6));
-    plate.getTransform().setWorldRotation(quat.quatIdentity());
-    plate.getTransform().setWorldScale(new vec3(40, 4.8, 0.4)); plate.getTransform().setWorldPosition(new vec3(0, -22, -80.6));
-    var prmv = plate.getComponent("Component.RenderMeshVisual");
-    prmv.mainMaterial = prmv.mainMaterial.clone();
+    var plate = global.scene.createSceneObject("Controls Backing");
+    var prmv = plate.createComponent("Component.RenderMeshVisual");
+    prmv.mesh = connections[0].rmv.mesh; prmv.mainMaterial = SPHERE_MAT.clone();
     prmv.mainPass.baseColor = new vec4(0.3, 0.12, 0.6, 1);
-    plate.enabled = true;
+    var pt = plate.getTransform();
+    var bw = 54, bh = 12, bd = 0.4, mc = connections[0];
+    pt.setWorldScale(new vec3(bw / mc.mW, bh / mc.mL, bd / mc.mD));
+    pt.setWorldRotation(quat.fromEulerAngles(0, 0, Math.PI / 2));   // mesh long axis is Y; lay it along X
+    pt.setWorldScale(new vec3(bh / mc.mW, bw / mc.mL, bd / mc.mD));
+    pt.setWorldPosition(new vec3(0, CTRL_Y, WORLD_Z - 1));
     print("RULESHIFT backing created");
 } catch (err) { print("RULESHIFT backing failed: " + err); }
 print("RULESHIFT radii: " + nodes.map(function (n) { return n.radius.toFixed(1); }).join(","));

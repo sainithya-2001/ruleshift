@@ -376,7 +376,7 @@
   Enabled: true
   Layers: 1
   LocalTransform: !<TransformEntity>
-    Position: {x: -12.000000, y: 0.000000, z: -80.000000}
+    Position: {x: -12.000000, y: -12.000000, z: -95.000000}
     Rotation: {x: 0.000000, y: 0.000000, z: 0.000000}
     Scale: {x: 10.000000, y: 10.000000, z: 10.000000}
     HasSegmentScaleCompensation: false
@@ -1069,7 +1069,7 @@
   Enabled: true
   Layers: 1
   LocalTransform: !<TransformEntity>
-    Position: {x: 0.000000, y: -22.000000, z: -80.000000}
+    Position: {x: 0.000000, y: -22.000000, z: -95.000000}
     Rotation: {x: 0.000000, y: 0.000000, z: 0.000000}
     Scale: {x: 1.000000, y: 1.000000, z: 1.000000}
     HasSegmentScaleCompensation: false
@@ -1505,7 +1505,7 @@
   Enabled: true
   Layers: 1
   LocalTransform: !<TransformEntity>
-    Position: {x: 0.000000, y: 16.000000, z: -80.000000}
+    Position: {x: 0.000000, y: 4.000000, z: -95.000000}
     Rotation: {x: 0.000000, y: 0.000000, z: 0.000000}
     Scale: {x: 10.000000, y: 10.000000, z: 10.000000}
     HasSegmentScaleCompensation: false
@@ -2116,15 +2116,14 @@
   Enabled: true
   ScriptAsset: !<reference> 1b2bd3cb-5bc8-42e8-a26b-7d7181f96da6
   ScriptInputsDefault:
-    buttonSize: true
-    gap: true
+    {}
   ScriptTypesDefault:
     {}
   ScriptInputs:
     "":
       controller: !<reference.ScriptComponent> 4aef1a10-019c-4696-a7b1-b4bd90edb0eb
-      buttonSize: !<Vec2> {x: 13.000000, y: 5.000000}
-      gap: !<float> 2.000000
+      buttonSize: !<Vec2> {x: 24.000000, y: 9.000000}
+      gap: !<float> 3.000000
   ScriptTypes:
     "":
       {}
@@ -2415,7 +2414,7 @@
   Enabled: true
   Layers: 1
   LocalTransform: !<TransformEntity>
-    Position: {x: 12.000000, y: 0.000000, z: -80.000000}
+    Position: {x: 12.000000, y: -12.000000, z: -95.000000}
     Rotation: {x: 0.000000, y: 0.000000, z: 0.000000}
     Scale: {x: 10.000000, y: 10.000000, z: 10.000000}
     HasSegmentScaleCompensation: false
