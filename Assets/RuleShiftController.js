@@ -11,11 +11,12 @@
 // RULESHIFT system: N nodes + list of connections {nodeA,nodeB,rule,visual}.
 // Each frame every connection adds a force to both of its nodes; forces are
 // summed per node, then integrated. Rules can be changed at any time.
-var RULES = { ATTRACT: "ATTRACT", REPEL: "REPEL" };
-var RULE_ORDER = [RULES.ATTRACT, RULES.REPEL];
+var RULES = { ATTRACT: "ATTRACT", REPEL: "REPEL", COLLISION_TRIGGER: "COLLISION_TRIGGER" };
+var RULE_ORDER = [RULES.ATTRACT, RULES.REPEL, RULES.COLLISION_TRIGGER];
 var RULE_COLOR = {
     ATTRACT: new vec4(1.0, 0.55, 0.15, 1),  // warm
-    REPEL: new vec4(0.2, 0.6, 1.0, 1)       // cool
+    REPEL: new vec4(0.2, 0.6, 1.0, 1),      // cool
+    COLLISION_TRIGGER: new vec4(0.8, 0.3, 1.0, 1) // violet
 };
 
 var nodes = [];      // {obj, tr, pos:vec3, vel:vec3, force:vec3, initial:vec3}
@@ -32,7 +33,8 @@ function addNode(obj) {
     var tr = obj.getTransform();
     var p = tr.getLocalPosition();
     nodes.push({ obj: obj, tr: tr, pos: new vec3(p.x, p.y, p.z), vel: vec3.zero(),
-        force: vec3.zero(), initial: new vec3(p.x, p.y, p.z), radius: meshRadius(obj) });
+        force: vec3.zero(), initial: new vec3(p.x, p.y, p.z), radius: meshRadius(obj),
+        baseScale: obj.getTransform().getLocalScale(), pulse: -1 });
     return nodes.length - 1;
 }
 function applyColor(c) {
@@ -44,7 +46,7 @@ function addConnection(a, b, rule, visual) {
     if (a < 0 || b < 0 || !visual) { return null; }
     var d = Math.max(nodes[a].pos.sub(nodes[b].pos).length, 0.1);
     var c = { a: a, b: b, rule: rule, visual: visual, rmv: visual.getComponent("Component.RenderMeshVisual"),
-        baseScaleY: visual.getTransform().getLocalScale().y, baseDist: d };
+        cooldownUntil: 0, baseScaleY: visual.getTransform().getLocalScale().y, baseDist: d };
     if (c.rmv) { c.rmv.mainMaterial = c.rmv.mainMaterial.clone(); }
     connections.push(c);
     applyColor(c);
@@ -88,6 +90,34 @@ function computeForces() {
     });
 }
 
+var TOUCH_COOLDOWN = 1.0, PULSE_TIME = 0.35, PULSE_AMOUNT = 0.4;
+function flip(rule) { return rule === RULES.ATTRACT ? RULES.REPEL : (rule === RULES.REPEL ? RULES.ATTRACT : rule); }
+function checkCollisions() {
+    connections.forEach(function (c) {
+        if (c.rule !== RULES.COLLISION_TRIGGER || elapsed < c.cooldownUntil) { return; }
+        var A = nodes[c.a], B = nodes[c.b];
+        if (A.pos.distance(B.pos) > A.radius + B.radius) { return; }
+        c.cooldownUntil = elapsed + TOUCH_COOLDOWN;
+        A.pulse = 0; B.pulse = 0;
+        print("RULESHIFT COLLISION " + A.obj.name + "-" + B.obj.name);
+        connections.forEach(function (o) {
+            if (o === c || o.rule === RULES.COLLISION_TRIGGER) { return; }
+            if (o.a === c.a || o.a === c.b || o.b === c.a || o.b === c.b) {
+                setRule(o, flip(o.rule), "collision");
+            }
+        });
+    });
+}
+function updatePulses(dt) {
+    nodes.forEach(function (n) {
+        if (n.pulse < 0) { return; }
+        n.pulse += dt;
+        var k = n.pulse >= PULSE_TIME ? 0 : Math.sin(Math.PI * n.pulse / PULSE_TIME);
+        if (n.pulse >= PULSE_TIME) { n.pulse = -1; }
+        n.tr.setLocalScale(n.baseScale.uniformScale(1 + PULSE_AMOUNT * k));
+    });
+}
+
 function integrate(dt) {
     nodes.forEach(function (n) {
         // soft bounds keep everything inside the view
@@ -127,6 +157,8 @@ script.createEvent("UpdateEvent").bind(function (e) {
     }
     computeForces();
     integrate(dt);
+    checkCollisions();
+    updatePulses(dt);
     connections.forEach(updateVisual);
     if (Math.floor(elapsed) !== lastLog) {
         lastLog = Math.floor(elapsed);
