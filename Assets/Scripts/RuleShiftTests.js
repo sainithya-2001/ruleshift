@@ -409,6 +409,37 @@ if (script.runTests) {
             var EXP = ["a floating paper lantern", "a tiny planet with rings", "a crystal tree", "a sleepy cloud", "a neon koi fish", "a floating paper lantern"];
             check("14 Surprise me cycles the 5 prompts in order and wraps", JSON.stringify(stub.calls) === JSON.stringify(EXP), JSON.stringify(stub.calls));
             api.clearAll(); yield 0.2;
+            // 15 toolbar: icon-first pills, one-word labels that never wrap, grouped [Play Reset] [Create Surprise Speak] [Unlink Clear]
+            var tf = ctl.toolbarFit();
+            check("15 Toolbar has the 7 one-word labels in group order", JSON.stringify(tf.labels) === JSON.stringify(["Play", "Reset", "Create", "Surprise", "Speak", "Unlink", "Clear"]), JSON.stringify(tf.labels));
+            check("15 Toolbar labels are single words (no spaces, nothing to wrap)", tf.labels.every(function (l) { return /^[A-Za-z]+$/.test(l); }));
+            check("15 Label fit pass completed", tf.ready === true && tf.size >= 14, "size " + tf.size);
+            var fitsAll = tf.fit.length === 7 && tf.fit.every(function (f) { return f.width <= f.allowed + 0.001 && f.height <= f.allowedH + 0.001; });
+            check("15 Every label fits its pill on one line (measured width and height)", fitsAll, tf.fit.map(function (f) { return f.label + " " + f.width.toFixed(2) + "/" + f.allowed.toFixed(2); }).join(" "));
+            check("15 Label overflow is forced to single-line (never wraps)", ctl.toolbarPills.every(function (p) { return p.content.textComponent.horizontalOverflow === HorizontalOverflow.Overflow; }));
+            var cx = tf.centers, d01 = cx[1] - cx[0], d12 = cx[2] - cx[1], d23 = cx[3] - cx[2], d34 = cx[4] - cx[3], d45 = cx[5] - cx[4], d56 = cx[6] - cx[5];
+            check("15 Groups are separated by a larger gap than pills within a group", d12 > d01 + 0.5 && d45 > d34 + 0.5 && Math.abs(d01 - d23) < 0.01 && Math.abs(d23 - d34) < 0.01 && Math.abs(d01 - d56) < 0.01, [d01, d12, d23, d34, d45, d56].map(function (d) { return d.toFixed(2); }).join(","));
+            check("15 All 7 pills fit between the screen edges", Math.abs(cx[0]) + tf.pillWidth / 2 <= api.view().halfW && Math.abs(cx[6]) + tf.pillWidth / 2 <= api.view().halfW);
+            api.reset(); yield 0.2;
+            check("15 Play pill reads Play when stopped", ctl.mainPill.content.text === "Play", ctl.mainPill.content.text);
+            api.activate(); yield 0.2;
+            check("15 Play pill reads Pause while live", ctl.mainPill.content.text === "Pause", ctl.mainPill.content.text);
+            api.pause(); yield 0.2;
+            check("15 Play pill reads Play when paused", ctl.mainPill.content.text === "Play", ctl.mainPill.content.text);
+            api.reset(); yield 0.2;
+
+            // 16 the Delete pill never overlaps an "Imagining…" / failure caption
+            stub.calls.length = 0; stub.cbs.length = 0;
+            var ix = api.imagine("a sleepy cloud"); yield 0.2;
+            T.tap(ix); yield 0.4;
+            var infoA = api.selectedInfo();
+            check("16 Selected generating node reports busy and the Delete pill is hidden", infoA && infoA.busy === true && ctl.deleteObj.enabled === false && ctl.deletePlate.enabled === false, JSON.stringify(infoA));
+            stub.cbs[0].onFail("x"); yield 0.4;
+            check("16 Delete stays hidden while the failure caption shows", api.selectedInfo().busy === true && ctl.deleteObj.enabled === false);
+            yield 4.4;
+            check("16 Delete pill returns once the caption is gone", api.selectedInfo().busy === false && ctl.deleteObj.enabled === true && ctl.deletePlate.enabled === true);
+            T.tap(ix); yield 0.2;
+            api.clearAll(); yield 0.2;
         }
 
         api.reset();
@@ -444,7 +475,7 @@ if (script.liveImagine) {
                 api.imagineTimeout(120);
                 t0 = elapsed; var idx = api.imagine(script.liveImaginePrompt);
                 T.place(idx, new vec3(9, -4, z));
-                print("RULESHIFT LIVE start '" + script.liveImaginePrompt + "' node " + idx);
+                print("RULESHIFT LIVE start '" + script.liveImaginePrompt + "' node " + idx); T.tap(idx);   // select the generating node: its caption shows and the Delete pill must stay hidden
                 st = "wait";
             } else if (st === "wait") {
                 var job = T.nodes[1] && T.nodes[1].job;

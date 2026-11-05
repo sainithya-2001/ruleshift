@@ -19,6 +19,10 @@ const BOUNCE_KEYS = ["low", "high"]
 
 const SURPRISE_PROMPTS = ["a floating paper lantern", "a tiny planet with rings", "a crystal tree", "a sleepy cloud", "a neon koi fish"]
 
+const TOOLBAR_TEXT_PROBE = 40 // labels are measured at this size, then scaled to the largest size that fits
+const TOOLBAR_TEXT_MAX = 72
+const TOOLBAR_TEXT_MIN = 14
+
 const Z = -95 // the world's depth plane
 const ASR_INITIAL_WINDOW = 10 // seconds to start speaking
 const ASR_SILENCE_AFTER_SPEECH = 2 // seconds of silence after the last partial ends the phrase
@@ -43,6 +47,7 @@ export class RuleShiftControls extends BaseScriptComponent {
   @input iconTrash: Texture
   @input iconMic: Texture
   @input iconMicOn: Texture
+  @input iconSurprise: Texture
 
   private mainPill: Pill
   private speakPill: Pill
@@ -56,6 +61,14 @@ export class RuleShiftControls extends BaseScriptComponent {
   private asrEvents = 0
   private lastState: string = ""
   private surpriseIndex = 0
+  private toolbarPills: Pill[] = []
+  private toolbarLabels: string[] = []
+  private toolbarCenters: number[] = []
+  private pillWidth = 9
+  private fitStage = 0
+  private fitFrame = 0
+  private labelFit: {label: string; width: number; allowed: number; height: number; allowedH: number}[] = []
+  private labelTextSize = TOOLBAR_TEXT_PROBE
   private palette: SceneObject
   private paletteParts: SceneObject[] = []
   private deleteObj: SceneObject
@@ -81,6 +94,7 @@ export class RuleShiftControls extends BaseScriptComponent {
     })
     this.createEvent("UpdateEvent").bind(() => {
       this.updateFloating()
+      this.updateLabelFit()
       if (this.listening) {
         // no timeout until the first partial arrives (10 s listening window), then 2 s of silence after the last partial
         if (this.asrEvents === 0) {
@@ -111,36 +125,94 @@ export class RuleShiftControls extends BaseScriptComponent {
     print("RULESHIFT ASR mic check: isEditor=" + editor + " - Lens Studio exposes no mic-permission query; mic is considered live only if a transcript event arrives after Speak")
   }
 
-  // ---- Toolbar: one compact row of icon + label pills along the bottom edge ----
+  // ---- Toolbar: seven icon-first pills (icon above a one-word label), grouped [Play Reset] [Create Surprise Speak] [Unlink Clear] ----
   private buildToolbar() {
     const api = this.controller.api
     const h = 6.3
-    const labels = ["Activate", "Reset", "Create", "Speak", "Surprise me", "Clear links", "Clear all"]
-    const icons = [this.iconPlay, this.iconReset, this.iconAdd, this.iconMic, null, this.iconClose, this.iconTrash]
-    let widths = [8.9, 7.6, 8.0, 7.6, 11.4, 10.1, 9.2]
-    const gap = 0.3
-    const total = widths.reduce((a, b) => a + b, 0) + gap * 5
-    const k = Math.min(1, (this.halfW * 2 - 1.5) / total)
-    widths = widths.map((w) => w * k)
+    const defs = [
+      {label: "Play", icon: this.iconPlay},
+      {label: "Reset", icon: this.iconReset},
+      {label: "Create", icon: this.iconAdd},
+      {label: "Surprise", icon: this.iconSurprise},
+      {label: "Speak", icon: this.iconMic},
+      {label: "Unlink", icon: this.iconClose},
+      {label: "Clear", icon: this.iconTrash},
+    ]
+    const groups = [2, 3, 2]
+    const gap = 0.3 // between pills in a group
+    const groupGap = 1.4 // between groups
+    const avail = this.halfW * 2 - 1.5
+    const pw = Math.min(9, (avail - gap * 4 - groupGap * 2) / 7)
+    this.pillWidth = pw
+    const total = pw * 7 + gap * 4 + groupGap * 2
     const y = -this.halfH + 0.8 + h / 2
-    api.makePlate("Toolbar Strip", total * k + 1.4, h + 1.2, 0.4, new vec3(0, y, Z - 1.2), DARK, -8)
-    let x = (-total * k) / 2
+    api.makePlate("Toolbar Strip", total + 1.4, h + 1.2, 0.4, new vec3(0, y, Z - 1.2), DARK, -8)
+    let x = -total / 2
+    let gi = 0
+    let left = groups[0]
     const pills: Pill[] = []
-    labels.forEach((label, i) => {
-      const cx = x + widths[i] / 2
-      api.makePlate("Pill " + label, widths[i], h, 0.4, new vec3(cx, y, Z - 0.8), PILL, -7)
-      pills.push(this.makePill(this.sceneObject, "Pill" + i, label, icons[i], new vec3(cx, y, Z + 0.5), new vec2(widths[i], h), 44, false, 2.2))
-      x += widths[i] + gap * k
+    defs.forEach((d, i) => {
+      const cx = x + pw / 2
+      api.makePlate("Pill " + d.label, pw, h, 0.4, new vec3(cx, y, Z - 0.8), PILL, -7)
+      pills.push(this.makePill(this.sceneObject, "Pill" + i, d.label, d.icon, new vec3(cx, y, Z + 0.5), new vec2(pw, h), TOOLBAR_TEXT_PROBE, false, 1.9, true))
+      this.toolbarLabels.push(d.label)
+      this.toolbarCenters.push(cx)
+      x += pw
+      left--
+      if (left === 0 && gi < groups.length - 1) {
+        x += groupGap
+        gi++
+        left = groups[gi]
+      } else x += gap
     })
+    this.toolbarPills = pills
     this.mainPill = pills[0]
     pills[0].button.onTriggerUp.add(() => this.controller.api.toggle())
     pills[1].button.onTriggerUp.add(() => this.controller.api.reset())
     pills[2].button.onTriggerUp.add(() => this.setPalette(!this.palette.enabled))
-    this.speakPill = pills[3]
-    pills[3].button.onTriggerUp.add(() => this.toggleSpeak())
-    pills[4].button.onTriggerUp.add(() => this.surpriseMe())
+    pills[3].button.onTriggerUp.add(() => this.surpriseMe())
+    this.speakPill = pills[4]
+    pills[4].button.onTriggerUp.add(() => this.toggleSpeak())
     pills[5].button.onTriggerUp.add(() => this.controller.api.clearLinks())
     pills[6].button.onTriggerUp.add(() => this.controller.api.clearAll())
+  }
+
+  // Labels never wrap: overflow is forced to single-line, then the text size is chosen from the measured widths so the widest label fits its pill.
+  private labelBox(p: Pill): {w: number; h: number} {
+    const tc: Text | null = (p.content as any).textComponent
+    if (!tc) return {w: -1, h: -1}
+    tc.horizontalOverflow = HorizontalOverflow.Overflow
+    const bb = tc.getBoundingBox()
+    return {w: bb.right - bb.left, h: bb.top - bb.bottom}
+  }
+
+  private updateLabelFit() {
+    this.fitFrame++
+    if (this.fitStage === 2 || this.fitFrame < 6) return
+    const allowed = this.pillWidth - 0.6 - 0.4 // padding plus a small safety margin
+    const allowedH = 6.3 - 0.8 - 1.9 - 0.2 - 0.3 // pill height minus padding, icon, spacing and a margin: the room left for one line of text
+    const boxes = this.toolbarPills.map((p) => this.labelBox(p))
+    if (boxes.some((b) => !(b.w > 0) || !(b.h > 0))) return // layout not ready yet; try again next frame
+    const widths = boxes.map((b) => b.w)
+    if (this.fitStage === 0) {
+      let size = TOOLBAR_TEXT_MAX
+      boxes.forEach((b) => (size = Math.min(size, Math.floor(TOOLBAR_TEXT_PROBE * 0.92 * Math.min(allowed / b.w, allowedH / b.h)))))
+      size = Math.max(TOOLBAR_TEXT_MIN, size)
+      this.labelTextSize = size
+      this.toolbarPills.forEach((p) => (p.content.textSize = size))
+      this.fitStage = 1
+      this.fitFrame = 0 // re-measure a few frames later, once the new size has laid out
+      return
+    }
+    if (this.fitFrame < 4) return
+    this.labelFit = this.toolbarPills.map((p, i) => ({label: this.toolbarLabels[i], width: boxes[i].w, allowed, height: boxes[i].h, allowedH}))
+    this.fitStage = 2
+    print("RULESHIFT toolbar labels: text size " + this.labelTextSize + ", pill " + this.pillWidth.toFixed(2) + " cm, " + this.labelFit.map((f) => f.label + " " + f.width.toFixed(2) + "x" + f.height.toFixed(2) + " in " + f.allowed.toFixed(2) + "x" + f.allowedH.toFixed(2)).join(", "))
+  }
+
+  // read-only views for the tests
+  public toolbarFit() {
+    return {ready: this.fitStage === 2, size: this.labelTextSize, fit: this.labelFit, labels: this.toolbarLabels.slice(), centers: this.toolbarCenters.slice(), pillWidth: this.pillWidth}
   }
 
   // ---- Voice creation: ASR transcript -> keyword parser (in the controller) -> spawn ----
@@ -274,7 +346,7 @@ export class RuleShiftControls extends BaseScriptComponent {
   private onState(st: string) {
     if (st === this.lastState) return
     this.lastState = st
-    this.mainPill.content.text = st === "live" ? "Pause" : st === "paused" ? "Resume" : "Activate"
+    this.mainPill.content.text = st === "live" ? "Pause" : "Play"
     this.mainPill.content.leadingIcon = st === "live" ? this.iconPause : this.iconPlay
   }
 
@@ -368,7 +440,7 @@ export class RuleShiftControls extends BaseScriptComponent {
     const api = this.controller.api
     if (!api.selectedInfo) return
     const info = api.selectedInfo()
-    if (!info || this.palette.enabled) {
+    if (!info || info.busy || this.palette.enabled) {
       this.deleteObj.enabled = false
       this.deletePlate.enabled = false
       return
@@ -382,7 +454,7 @@ export class RuleShiftControls extends BaseScriptComponent {
     this.deletePlate.getTransform().setWorldPosition(new vec3(nearer.x, nearer.y, nearer.z - 0.6))
   }
 
-  private makePill(parent: SceneObject, name: string, label: string, icon: Texture | null, pos: vec3, size: vec2, textSize: number, local = false, iconSize = 2.2): Pill {
+  private makePill(parent: SceneObject, name: string, label: string, icon: Texture | null, pos: vec3, size: vec2, textSize: number, local = false, iconSize = 2.2, stacked = false): Pill {
     const so = global.scene.createSceneObject(name)
     so.setParent(parent)
     if (local) so.getTransform().setLocalPosition(pos)
@@ -391,6 +463,11 @@ export class RuleShiftControls extends BaseScriptComponent {
     const content = so.createComponent(ElementContent.getTypeName()) as ElementContent
     content.text = label
     content.textSize = textSize
+    if (stacked) {
+      content.iconLayout = "top" // icon above the label: icon-first and the full pill width is free for the word
+      content.spacing = 0.2
+      content.padding = {top: 0.4, right: 0.3, bottom: 0.4, left: 0.3}
+    }
     ;(content as any)._useThemeColors = false // bright white labels (the theme's grey reads dim on the additive display)
     if (icon) {
       content.leadingIcon = icon

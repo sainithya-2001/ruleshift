@@ -690,7 +690,8 @@ script.api.maxNodes = MAX_NODES;
 script.api.deleteSelected = function () { return selNode ? deleteNode(selNode) : false; };
 script.api.selectedInfo = function () {
     if (!selNode) { return null; }
-    return { x: selNode.pos.x, y: selNode.pos.y, z: selNode.pos.z, r: selNode.radius };
+    // busy: an "Imagining…" / failure caption is showing above this node, so the Delete pill stays hidden (it would overlap the caption)
+    return { x: selNode.pos.x, y: selNode.pos.y, z: selNode.pos.z, r: selNode.radius, busy: !!(selNode.job && selNode.job.cap) };
 };
 // UI helpers for the palette (TypeScript side): an opaque plate and a round colour swatch, built from the shared meshes.
 script.api.makePlate = function (name, w, h, d, pos, col, order) {
