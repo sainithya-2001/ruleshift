@@ -19,6 +19,7 @@
     - !<own> 68608a41-7555-4180-aa24-6a41585e6bbc
     - !<own> 4a04b12b-7ef7-43f7-988b-6c806706db55
     - !<own> 44722fc5-ffda-439e-b442-f872d71305d3
+    - !<own> 289f97a7-765f-485e-b48f-d19f29a48ce6
   layers: !<Layers/267ee9a7-aff2-4f9d-9a49-f71214747d03>
     userLayers:
       - id: 1
@@ -376,7 +377,7 @@
   Enabled: true
   Layers: 1
   LocalTransform: !<TransformEntity>
-    Position: {x: -12.000000, y: -12.000000, z: -95.000000}
+    Position: {x: -12.000000, y: -11.000000, z: -95.000000}
     Rotation: {x: 0.000000, y: 0.000000, z: 0.000000}
     Scale: {x: 10.000000, y: 10.000000, z: 10.000000}
     HasSegmentScaleCompensation: false
@@ -797,6 +798,21 @@
     - !<own> 3a794764-c758-4d72-9d89-bf3ed978113f
   Components:
     []
+- !<SceneObject/289f97a7-765f-485e-b48f-d19f29a48ce6>
+  PrefabRemaps:
+    []
+  Name: RULESHIFT Tests
+  Enabled: true
+  Layers: 1
+  LocalTransform: !<TransformEntity>
+    Position: {x: 0.000000, y: 0.000000, z: 0.000000}
+    Rotation: {x: 0.000000, y: 0.000000, z: 0.000000}
+    Scale: {x: 1.000000, y: 1.000000, z: 1.000000}
+    HasSegmentScaleCompensation: false
+  Children:
+    []
+  Components:
+    - !<own> d0f9f64f-29a8-490d-88d7-e288948b3162
 - !<Skin/28e05826-1521-46fa-a54c-80f2957ec80c>
   PrefabRemaps:
     []
@@ -2600,7 +2616,7 @@
   Enabled: true
   Layers: 1
   LocalTransform: !<TransformEntity>
-    Position: {x: 12.000000, y: -12.000000, z: -95.000000}
+    Position: {x: 12.000000, y: -11.000000, z: -95.000000}
     Rotation: {x: 0.000000, y: 0.000000, z: 0.000000}
     Scale: {x: 10.000000, y: 10.000000, z: 10.000000}
     HasSegmentScaleCompensation: false
@@ -2937,6 +2953,23 @@
     - !<own> bb9036be-541f-49e7-9554-c297d354da21
   Components:
     []
+- !<ScriptComponent/d0f9f64f-29a8-490d-88d7-e288948b3162>
+  PrefabRemaps:
+    []
+  Name: RuleShiftTests
+  Enabled: true
+  ScriptAsset: !<reference> 004f0b7d-69de-42c8-b8b6-a214953f568b
+  ScriptInputsDefault:
+    runTests: true
+  ScriptTypesDefault:
+    {}
+  ScriptInputs:
+    "":
+      controller: !<reference.ScriptComponent> 4aef1a10-019c-4696-a7b1-b4bd90edb0eb
+      runTests: false
+  ScriptTypes:
+    "":
+      {}
 - !<ScriptComponent/d3e2fbc5-8795-4913-9af6-c8626f8e6d9c>
   PrefabRemaps:
     []

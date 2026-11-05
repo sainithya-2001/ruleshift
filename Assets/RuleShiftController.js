@@ -252,14 +252,14 @@ function updateGoal(dt) {
         if (settleTime > 1.5) { goalStage = 3; startGoalPulse(); goalText.text = "Triangle! Rule rewritten! \u2728"; print("RULESHIFT goal 2 complete"); }
     }
 }
-var BOX_X = 19, BOX_YMIN = -12, BOX_YMAX = 10, BOX_Z = 10;   // keeps spheres above the buttons and inside the view
+var BOX_X = 19, BOX_YMIN = -11, BOX_YMAX = 10, BOX_Z = 10;   // keeps spheres above the buttons and inside the view
 function clampToBox(n, p) {
     return new vec3(Math.max(-BOX_X, Math.min(BOX_X, p.x)),
         Math.max(BOX_YMIN, Math.min(BOX_YMAX, p.y)),
         Math.max(n.initial.z - BOX_Z, Math.min(n.initial.z + BOX_Z, p.z)));
 }   // keeps spheres and labels below the challenge panel
 // Soft collision: any overlapping pair is pushed apart to exactly touching. A grabbed sphere is never pushed.
-function resolveOverlaps() {
+function resolveOverlaps(moveDragged) {   // moveDragged: last resort when the other sphere is wall-pinned
     for (var i = 0; i < nodes.length; i++) {
         for (var j = i + 1; j < nodes.length; j++) {
             var A = nodes[i], B = nodes[j];
@@ -267,10 +267,12 @@ function resolveOverlaps() {
             if (dist >= minD) { continue; }
             var dir = dist > 0.001 ? d.uniformScale(1 / dist) : new vec3(1, 0, 0);
             var pen = minD - dist;
-            var wA = A.dragging ? 0 : (B.dragging ? 1 : 0.5), wB = B.dragging ? 0 : (A.dragging ? 1 : 0.5);
+            var dA = A.dragging && !moveDragged, dB = B.dragging && !moveDragged;
+            var wA = dA ? 0 : (dB ? 1 : 0.5), wB = dB ? 0 : (dA ? 1 : 0.5);
+            if (moveDragged && A.dragging !== B.dragging) { wA = A.dragging ? 1 : 0; wB = B.dragging ? 1 : 0; }   // other sphere is pinned: grabbed one yields
             A.pos = A.pos.sub(dir.uniformScale(pen * wA)); B.pos = B.pos.add(dir.uniformScale(pen * wB));
-            if (!A.dragging) { A.tr.setLocalPosition(A.pos); }
-            if (!B.dragging) { B.tr.setLocalPosition(B.pos); }
+            if (wA > 0) { A.tr.setLocalPosition(A.pos); }
+            if (wB > 0) { B.tr.setLocalPosition(B.pos); }
         }
     }
 }
@@ -335,10 +337,20 @@ script.api.toggle = function () {   // Activate -> Pause -> Resume -> Pause ...
     if (state === "live") { script.api.pause(); } else if (state === "paused") { script.api.resume(); } else { script.api.activate(); }
 };
 script.api.reset = resetWorld;
+var frameCount = 0;
+script.api.test = {   // read/write hooks for RuleShiftTests.js
+    nodes: nodes, connections: connections, setRule: setRule, cycleRule: cycleRule,
+    box: { x: BOX_X, yMin: BOX_YMIN, yMax: BOX_YMAX, zr: BOX_Z, buttonTop: -16 },
+    goalStage: function () { return goalStage; },
+    frames: function () { return frameCount; },
+    linkColor: function (c) { var k = c.rmv.mainPass.baseColor; return k.r.toFixed(2) + "," + k.g.toFixed(2) + "," + k.b.toFixed(2); },
+    place: function (i, v) { var n = nodes[i]; n.pos = new vec3(v.x, v.y, v.z); n.vel = vec3.zero(); n.tr.setLocalPosition(n.pos); }
+};
 
 var elapsed = 0, lastToggle = 0;
 script.createEvent("UpdateEvent").bind(function (e) {
     var dt = Math.min(e.getDeltaTime(), 0.05);
+    frameCount++;
     lastDt = dt;
     elapsed += e.getDeltaTime();
     if (state === "live" && script.debugAutoToggle && elapsed - lastToggle >= 3 && connections.length) {
@@ -351,10 +363,13 @@ script.createEvent("UpdateEvent").bind(function (e) {
         computeForces();
         integrate(dt);
     }
-    resolveOverlaps();
+    for (var it = 0; it < 6; it++) {   // push apart, then re-clamp so a shove can never leave the box
+        resolveOverlaps(it >= 2);
+        nodes.forEach(function (n) { if (!n.dragging || it >= 2) { n.pos = clampToBox(n, n.pos); n.tr.setLocalPosition(n.pos); } });
+    }
     if (state === "live") { checkCollisions(); }
     updatePulses(dt);
-    updateGoal(dt);
+    updateGoal(Math.min(e.getDeltaTime(), 0.25));   // real time, so goal timers don't slow down at low frame rates
     connections.forEach(updateLabel);
     connections.forEach(updateVisual);
 });
