@@ -44,7 +44,7 @@ function addNode(obj) {
     var p = tr.getLocalPosition();
     nodes.push({ obj: obj, tr: tr, pos: new vec3(p.x, p.y, p.z), vel: vec3.zero(),
         force: vec3.zero(), initial: new vec3(p.x, p.y, p.z), radius: meshRadius(obj),
-        baseScale: obj.getTransform().getLocalScale(), pulse: -1, color: col, rmv: nrmv });
+        baseScale: obj.getTransform().getLocalScale(), pulse: -1, dragging: false, color: col, rmv: nrmv });
     return nodes.length - 1;
 }
 var HALO_SCALE = 1.7;
@@ -156,6 +156,7 @@ function updatePulses(dt) {
 
 function integrate(dt) {
     nodes.forEach(function (n) {
+        if (n.dragging) { return; }
         // soft bounds keep everything inside the view
         n.vel = n.vel.add(n.force.uniformScale(dt)).uniformScale(Math.max(0, 1 - DAMPING * dt));
         var sp = n.vel.length;
@@ -170,6 +171,13 @@ function integrate(dt) {
     });
 }
 
+function syncDragged() {   // a grabbed sphere owns its position; physics resumes from wherever it is released
+    nodes.forEach(function (n) {
+        if (!n.dragging) { return; }
+        var p = n.tr.getLocalPosition();
+        n.pos = new vec3(p.x, p.y, p.z); n.vel = vec3.zero(); n.force = vec3.zero();
+    });
+}
 var UP = new vec3(0, 1, 0);
 var POP_TIME = 0.4, lastDt = 0.016;
 var LABEL_TEXT = { ATTRACT: "ATTRACT", REPEL: "REPEL", COLLISION_TRIGGER: "ON COLLISION" };
@@ -215,7 +223,7 @@ function setState(st) {
 function resetWorld() {
     nodes.forEach(function (n) {
         n.pos = new vec3(n.initial.x, n.initial.y, n.initial.z);
-        n.vel = vec3.zero(); n.force = vec3.zero(); n.pulse = -1;
+        n.vel = vec3.zero(); n.force = vec3.zero(); n.pulse = -1; n.dragging = false;
         n.tr.setLocalPosition(n.pos); n.tr.setLocalScale(n.baseScale);
     });
     connections.forEach(function (c) { c.cooldownUntil = 0; updateVisual(c); });
@@ -241,6 +249,7 @@ script.createEvent("UpdateEvent").bind(function (e) {
         var c0 = connections[0];
         cycleRule(c0, "auto");
     }
+    syncDragged();
     if (state === "live") {
         computeForces();
         integrate(dt);
@@ -254,6 +263,21 @@ script.createEvent("UpdateEvent").bind(function (e) {
 
 // SIK hand-interaction events must be subscribed during OnStartEvent.
 script.createEvent("OnStartEvent").bind(function () {
+    nodes.forEach(function (n) {
+        n.obj.getComponents("Component.ScriptComponent").forEach(function (sc) {
+            if (sc.onTriggerStart && sc.onTriggerEnd) {
+                sc.onTriggerStart.add(function () { n.dragging = true; });
+                var end = function () { n.dragging = false; var p = n.tr.getLocalPosition(); n.pos = new vec3(p.x, p.y, p.z); n.vel = vec3.zero(); };
+                sc.onTriggerEnd.add(end);
+                if (sc.onTriggerCanceled) { sc.onTriggerCanceled.add(end); }
+            }
+        });
+        // collider matches the visible sphere
+        var col = n.obj.getComponent("Component.ColliderComponent");
+        if (col && col.shape && col.shape.radius !== undefined) {
+            var sh = col.shape; sh.radius = (n.rmv.mesh.aabbMax.x - n.rmv.mesh.aabbMin.x) / 2; col.shape = sh;
+        }
+    });
     [script.interactableAB, script.interactableBC].forEach(function (inter, i) {
         var c = connections[i];
         if (inter && inter.onTriggerStart && c) {
