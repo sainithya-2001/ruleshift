@@ -113,6 +113,8 @@ export class RuleShiftControls extends BaseScriptComponent {
       }
       if (this.captionTimer > 0) {
         this.captionTimer -= getDeltaTime()
+        // above the topmost object on the stage (stacked over any "Imagining" captions), never at a node
+        this.caption.sceneObject.getTransform().setWorldPosition(new vec3(0, this.controller.api.captionY(this.controller.api.captionCount()), Z))
         if (this.captionTimer <= 0) this.caption.sceneObject.enabled = false
       }
     })
@@ -225,6 +227,9 @@ export class RuleShiftControls extends BaseScriptComponent {
     this.caption.verticalAlignment = VerticalAlignment.Center
     this.caption.textFill.color = new vec4(1, 1, 1, 1)
     this.caption.renderOrder = 100
+    this.caption.outlineSettings.enabled = true
+    this.caption.outlineSettings.size = 0.5
+    this.caption.outlineSettings.fill.color = new vec4(0.05, 0.03, 0.2, 1)
     so.getTransform().setWorldPosition(new vec3(0, 12, Z))
     so.enabled = false
   }
@@ -232,6 +237,7 @@ export class RuleShiftControls extends BaseScriptComponent {
   private showCaption(text: string, secs: number) {
     this.caption.text = text
     this.caption.sceneObject.enabled = true
+    this.caption.sceneObject.getTransform().setWorldPosition(new vec3(0, this.controller.api.captionY(this.controller.api.captionCount()), Z))
     this.captionTimer = secs
   }
 

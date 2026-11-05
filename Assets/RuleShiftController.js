@@ -154,6 +154,7 @@ function findFreeSpot(radius) {
     }
     return best;
 }
+function glowBoost(n) { return n.shape === "sphere" ? 1 : 1.8; }   // slimmer silhouettes (gem, cone...) need a stronger halo to read like the orb's
 function addGlow(n) {
     // soft round halo: three nested, very transparent additive spheres (never a scaled copy of the shape, which reads as an outline)
     n.glow = [];
@@ -164,7 +165,8 @@ function addGlow(n) {
         v.mesh = SPHERE_MESH; v.mainMaterial = SPHERE_MAT.clone();
         var p = v.mainPass;
         p.blendMode = BlendMode.Add; p.depthWrite = false;
-        p.baseColor = new vec4(n.color.r * L[1], n.color.g * L[1], n.color.b * L[1], L[1]);
+        var ga = Math.min(0.55, L[1] * glowBoost(n));
+        p.baseColor = new vec4(n.color.r * ga, n.color.g * ga, n.color.b * ga, ga);
         v.setRenderOrder(-3 + li);   // drawn before the object so it only shows around it
         o.getTransform().setLocalScale(vec3.one().uniformScale(L[0]));
         n.glow.push(o);
@@ -394,7 +396,7 @@ function handleTapNode(n) {
     else { print("RULESHIFT already linked"); }
     selNode = null;
 }
-function pressStartNode(n) { n.dragging = true; n.tapT = elapsed; n.tapP = n.tr.getLocalPosition(); }
+function pressStartNode(n) { if (pendingPlace === n) { pendingPlace = null; } n.dragging = true; n.tapT = elapsed; n.tapP = n.tr.getLocalPosition(); }
 function pressEndNode(n, allowTap) {
     if (nodeIndex(n) < 0) { return; }
     n.dragging = false; var p = n.tr.getLocalPosition(); n.pos = new vec3(p.x, p.y, p.z); n.vel = vec3.zero();
@@ -455,14 +457,17 @@ function computeForces() {
     });
 }
 
-var TOUCH_COOLDOWN = 1.0, PULSE_TIME = 0.5, PULSE_AMOUNT = 0.9;
+var REARM_GAP = 1.5, PULSE_TIME = 0.5, PULSE_AMOUNT = 0.9;
 function flip(rule) { return rule === RULES.ATTRACT ? RULES.REPEL : (rule === RULES.REPEL ? RULES.ATTRACT : rule); }
 function checkCollisions() {
     connections.slice().forEach(function (c) {
-        if (c.rule !== RULES.COLLISION_TRIGGER || elapsed < c.cooldownUntil) { return; }
+        if (c.rule !== RULES.COLLISION_TRIGGER) { c.touching = false; return; }
         var A = c.A, B = c.B;
-        if (A.pos.distance(B.pos) > A.radius + B.radius + 0.1) { return; }
-        c.cooldownUntil = elapsed + TOUCH_COOLDOWN;
+        // edge-triggered: fires once when the pair starts touching, re-arms only after they separate by REARM_GAP
+        var dd = A.pos.distance(B.pos), touchD = A.radius + B.radius;
+        if (c.touching) { if (dd > touchD + REARM_GAP) { c.touching = false; } return; }
+        if (dd > touchD + 0.1) { return; }
+        c.touching = true; c.fires = (c.fires || 0) + 1;
         A.pulse = 0; B.pulse = 0;
         print("RULESHIFT COLLISION " + A.obj.name + "-" + B.obj.name);
         connections.forEach(function (o) {
@@ -681,13 +686,34 @@ var UP = new vec3(0, 1, 0);
 var POP_TIME = 0.4, lastDt = 0.016;
 var LABEL_TEXT = { ATTRACT: "ATTRACT", REPEL: "REPEL", COLLISION_TRIGGER: "ON COLLISION" };
 var labelAlpha = 1;   // labels stay fully opaque in every mode
+var LABEL_NUDGE_STEP = 0.8, LABEL_NUDGE_MAX = 40;
+function labelExtent(c) {   // half-size and centre offset of the label text in world cm (the camera sits at the origin, so depth = -z)
+    var bb = c.label.getBoundingBox(), sc = c.labelTr.getWorldScale().x;
+    var w = (bb.right - bb.left) * sc, h = (bb.top - bb.bottom) * sc;
+    if (!(w > 0) || !(h > 0)) { return null; }
+    return { hw: w / 2, hh: h / 2, ox: (bb.left + bb.right) / 2 * sc, oy: (bb.top + bb.bottom) / 2 * sc };
+}
+function labelHitsNode(p, e) {   // compare in screen (angular) space: label rectangle vs each node's disc
+    var dep = Math.max(-p.z, 1), lx = (p.x + e.ox) / dep, ly = (p.y + e.oy) / dep, hw = e.hw / dep, hh = e.hh / dep;
+    for (var i = 0; i < nodes.length; i++) {
+        var n = nodes[i], nd = Math.max(-n.pos.z, 1), nr = n.radius / nd;
+        var dx = Math.max(Math.abs(lx - n.pos.x / nd) - hw, 0), dy = Math.max(Math.abs(ly - n.pos.y / nd) - hh, 0);
+        if (dx * dx + dy * dy < nr * nr) { return true; }
+    }
+    return false;
+}
 function updateLabel(c) {
     var A = c.A.pos, B = c.B.pos;
     var mid = A.add(B).uniformScale(0.5);
     var toCam = mid.uniformScale(-1 / Math.max(mid.length, 0.01));   // camera is at the origin
     var cx = 0; nodes.forEach(function (n) { cx += n.pos.x / nodes.length; });   // side links push their labels outward so labels don't pile up
     var dx = Math.max(-1, Math.min(1, (mid.x - cx) / 6)) * 6.5;
-    c.labelTr.setWorldPosition(mid.add(toCam.uniformScale(22)).add(new vec3(dx, 7, 0)));
+    var lp = mid.add(toCam.uniformScale(22)).add(new vec3(dx, 7, 0));
+    // never sit on top of an object: if the label's screen footprint touches any node, nudge it upward until clear
+    var ext = labelExtent(c), nudged = 0;
+    if (ext) { while (nudged < LABEL_NUDGE_MAX && labelHitsNode(lp, ext)) { lp = lp.add(new vec3(0, LABEL_NUDGE_STEP, 0)); nudged += LABEL_NUDGE_STEP; } }
+    c.labelNudge = nudged;
+    c.labelTr.setWorldPosition(lp);
     c.label.text = LABEL_TEXT[c.rule];
     var k = RULE_COLOR[c.rule];
     c.label.textFill.color = new vec4(k.r, k.g, k.b, labelAlpha);
@@ -733,7 +759,7 @@ function resetWorld() {   // restores positions; created objects and links are k
         n.tr.setLocalPosition(n.pos); n.tr.setLocalScale(n.baseScale);
     });
     clearCause();
-    connections.forEach(function (c) { c.cooldownUntil = 0; updateVisual(c); });
+    connections.forEach(function (c) { c.cooldownUntil = 0; c.touching = false; updateVisual(c); });
     selNode = null;
     if (goalEnabled) { goalStage = 0; settleTime = 0; goalText.text = GOAL_1; nextText.text = "Next: " + GOAL_2; }
     setState("creation");
@@ -831,6 +857,9 @@ script.api.test = {   // read/write hooks for RuleShiftTests.js
     linkColor: function (c) { var k = c.rmv.mainPass.baseColor; return k.r.toFixed(2) + "," + k.g.toFixed(2) + "," + k.b.toFixed(2); },
     place: function (i, v) { var n = nodes[i]; n.pos = new vec3(v.x, v.y, v.z); n.vel = vec3.zero(); n.tr.setLocalPosition(n.pos); },
     connect: function (i, j, rule) { var c = slotFor(nodes[i], nodes[j], true); if (!c.active) { activateLink(c, rule || RULES.ATTRACT, true); } return c; },
+    labelInfo: function (c) { var e = labelExtent(c); var p = c.labelTr.getWorldPosition(); return { ext: e, nudge: c.labelNudge, y: p.y, hits: e ? labelHitsNode(p, e) : null }; },
+    fires: function (c) { return c.fires || 0; },
+    hintVisible: function () { return hintObj.enabled; },
     glowInfo: function (i) { var n = nodes[i]; return n.glow.map(function (o) { var p = o.getComponent("Component.RenderMeshVisual").mainPass; return { blend: p.blendMode, alpha: p.baseColor.a }; }); }
 };
 
@@ -1053,11 +1082,24 @@ function swapInModel(job, gltf) {
     finishCaption(job, null);
     print("RULESHIFT imagine OK '" + job.prompt + "' in " + (elapsed - job.t0).toFixed(1) + "s (fit scale " + f.toFixed(4) + ", radius " + b2.radius.toFixed(2) + ")");
 }
+// Captions sit above the topmost object on the stage (never at the node), stacked when several show at once.
+var CAP_MARGIN = 4, CAP_STEP = 4.5, CAP_MAX_Y = 22;
+function captionY(slot) {
+    var top = BOX_YMAX;
+    nodes.forEach(function (n) { top = Math.max(top, n.pos.y + n.radius); });
+    return Math.min(top + CAP_MARGIN, CAP_MAX_Y - 0) + (slot || 0) * CAP_STEP;
+}
+function capSlot(job) { var k = 0; for (var i = 0; i < imagineJobs.length; i++) { if (imagineJobs[i] === job) { return k; } if (imagineJobs[i].cap) { k++; } } return k; }
+function styleCaption(t) {   // readable on any background: dark outline
+    t.outlineSettings.enabled = true; t.outlineSettings.size = 0.5; t.outlineSettings.fill.color = new vec4(0.05, 0.03, 0.2, 1);
+}
 function imagine(prompt) {
     prompt = cleanPrompt(prompt) || String(prompt || "").trim();
     var n = spawnNode({ shape: "sphere", color: IMAGINE_COLOR, glow: true, size: IMAGINE_SIZE, name: "Imagined: " + prompt });
     if (!n) { return -1; }
-    var cap = makeText("Imagine Caption", 60, new vec3(n.pos.x, n.pos.y + n.radius + 4, WORLD_Z), new vec4(0.85, 0.95, 1, 1));
+    if (pendingPlace === n) { pendingPlace = null; }   // it appears at a free spot: nothing waits for a pinch, so no placement hint
+    var cap = makeText("Imagine Caption", 60, new vec3(0, captionY(0), WORLD_Z), new vec4(0.85, 0.95, 1, 1));
+    styleCaption(cap.text);
     cap.text.text = "Imagining '" + prompt + "'… 0s"; cap.text.renderOrder = 100;
     var job = { n: n, prompt: prompt, t0: elapsed, state: "pending", result: null, cap: cap, capUntil: 0, cancel: null, reason: "", timeout: imagineTimeout };
     imagineJobs.push(job);
@@ -1101,12 +1143,14 @@ function updateImagine(dt) {
             if (job.cap && secs !== job.lastSecs) { job.lastSecs = secs; job.cap.text.text = "Imagining '" + job.prompt + "'… " + secs + "s"; }
         }
         if (job.cap) {
-            job.cap.tr.setWorldPosition(new vec3(n.pos.x, Math.min(n.pos.y + n.radius + 4, 22), WORLD_Z));
+            job.cap.tr.setWorldPosition(new vec3(0, captionY(capSlot(job)), WORLD_Z));
             if (job.state === "failed" && elapsed >= job.capUntil) { finishCaption(job, null); }
         }
         if (job.state !== "pending" && !job.cap) { imagineJobs.splice(i, 1); }
     }
 }
+script.api.captionY = captionY;
+script.api.captionCount = function () { return imagineJobs.filter(function (j) { return !!j.cap; }).length; };
 script.api.cleanPrompt = cleanPrompt;
 script.api.setGenerator = function (fn) { imagineGen = fn; };
 script.api.imagine = imagine;

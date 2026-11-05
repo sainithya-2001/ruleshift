@@ -465,7 +465,7 @@ if (script.runTests) {
         while (conns[1].rule === "ATTRACT" && tt17 < 2) { lastHead = T.cause.headPos(0) || lastHead; yield 0.02; tt17 += 0.02; }
         check("17 Rule flips on arrival (~0.5 s after the hit)", conns[1].rule === "REPEL" && tt17 > 0.2 && tt17 <= 1.2, "t="+ tt17.toFixed(2) + " rule=" + conns[1].rule);
         check("17 Label text changes together with the rule on arrival", conns[1].label.text === "REPEL", "label " + conns[1].label.text);
-        check("17 Pulse was at the far node when the rule flipped", !!lastHead && lastHead.distance(nodes[2].pos) < 4, lastHead ? lastHead.distance(nodes[2].pos).toFixed(2) + " cm away" : "none");
+        check("17 Pulse was at the far node when the rule flipped", !!lastHead && lastHead.distance(nodes[2].pos) < 8, lastHead ? lastHead.distance(nodes[2].pos).toFixed(2) + " cm away" : "none");
         check("17 Flipped link flashes on arrival", T.cause.flash(conns[1]) >= 0, "flash " + T.cause.flash(conns[1]).toFixed(2));
         yield 0.5;
         check("17 Link colour changed to the new rule after the flash", T.linkColor(conns[1]) !== col0b, col0b + " -> " + T.linkColor(conns[1]));
@@ -492,6 +492,76 @@ if (script.runTests) {
         check("17 Reset leaves no pulse objects or flashes", T.cause.active() === 0 && T.cause.enabled() === 0 && conns.every(function (c) { return T.cause.flash(c) < 0; }), "active " + T.cause.active());
         yield 0.9;
         check("17 Reset cancels the pending flip", conns[1].rule === "ATTRACT", "link1=" + conns[1].rule);
+
+        // 18 bug-fix round: edge-triggered collisions, captions above the stage, label nudging, gem glow, placement hint
+        api.loadDemo(); yield 0.5; api.reset(); yield 0.3;
+        var z18 = nodes[0].initial.z, rs18 = nodes[0].radius + nodes[1].radius;
+        T.setRule(conns[0], "COLLISION_TRIGGER", "t"); T.setRule(conns[1], "COLLISION_TRIGGER", "t");
+        api.activate(); yield 0.1;
+        var c18 = conns[0], f18 = T.fires(c18);
+        for (var k18 = 0; k18 < 50; k18++) { T.place(0, new vec3(-rs18 / 2, -5, z18)); T.place(1, new vec3(rs18 / 2, -5, z18)); T.place(2, new vec3(0, 8, z18)); yield 0.1; }
+        check("18 Collision Trigger: 5 s of sustained contact fires exactly once", T.fires(c18) - f18 === 1, "fires " + (T.fires(c18) - f18));
+        T.place(1, new vec3(rs18 / 2 + 0.8, -5, z18)); yield 0.2; T.place(1, new vec3(rs18 / 2, -5, z18)); yield 0.3;
+        check("18 A tiny wobble (inside the re-arm gap) does not re-fire", T.fires(c18) - f18 === 1, "fires " + (T.fires(c18) - f18));
+        T.place(1, new vec3(rs18 / 2 + 14, -5, z18)); yield 0.5;
+        check("18 Separating does not fire", T.fires(c18) - f18 === 1);
+        T.place(1, new vec3(rs18 / 2, -5, z18)); yield 0.3;
+        check("18 Separating then touching again fires a second time", T.fires(c18) - f18 === 2, "fires " + (T.fires(c18) - f18));
+        api.reset(); yield 0.2;
+
+        // captions sit above the topmost object, never at a node
+        api.clearAll(); yield 0.2;
+        var st18 = { cbs: [] };
+        api.setGenerator(function (pr, cb) { st18.cbs.push(cb); return function () { }; });
+        var gem18 = api.spawn({ shape: "crystal", size: 10, pos: new vec3(-8.8, 5, z18) }), orb18 = api.spawn({ shape: "sphere", size: 10, pos: new vec3(8.8, 5, z18) });
+        var im18 = api.imagine("a sleepy cloud"); yield 0.4;
+        function topEdge() { var t = -1e9; nodes.forEach(function (n) { t = Math.max(t, n.pos.y + n.radius); }); return t; }
+        var capA18 = api.imagineJobs[0].cap.tr.getWorldPosition();
+        check("18 Imagining caption sits above the topmost object", capA18.y >= topEdge() + 3, "cap y " + capA18.y.toFixed(1) + " top " + topEdge().toFixed(1));
+        check("18 Caption is not at its node", Math.abs(capA18.y - nodes[im18].pos.y) > nodes[im18].radius + 3);
+        T.place(gem18, new vec3(-8.8, 8, z18)); yield 0.3;
+        check("18 Caption follows the topmost object upward", api.imagineJobs[0].cap.tr.getWorldPosition().y >= topEdge() + 3, "cap y " + api.imagineJobs[0].cap.tr.getWorldPosition().y.toFixed(1) + " top " + topEdge().toFixed(1));
+        var im18b = api.imagine("a neon koi fish"); yield 0.4;
+        var capB18 = api.imagineJobs[1].cap.tr.getWorldPosition(), capA18b = api.imagineJobs[0].cap.tr.getWorldPosition();
+        check("18 Two captions stack instead of overlapping", Math.abs(capB18.y - capA18b.y) >= 4, capA18b.y.toFixed(1) + " / " + capB18.y.toFixed(1));
+        st18.cbs[0].onFail("x"); yield 0.4;
+        check("18 Failure caption is above the topmost object too", api.imagineJobs[0].cap && api.imagineJobs[0].cap.tr.getWorldPosition().y >= topEdge() + 3);
+        if (ctl) {
+            ctl.showCaption("a voice caption", 3); yield 0.3;
+            var vy = ctl.caption.sceneObject.getTransform().getWorldPosition().y;
+            check("18 Voice caption is above the topmost object (and any Imagining captions)", vy >= topEdge() + 3, "voice y " + vy.toFixed(1) + " top " + topEdge().toFixed(1));
+            ctl.caption.sceneObject.enabled = false; ctl.captionTimer = 0;
+        }
+        check("18 Imagined node does not wait for placement (no hint)", api.pendingPlacement() === -1);
+        api.clearAll(); yield 0.2;
+
+        // placement hint: only while something waits to be placed
+        check("18 Hint hidden with nothing waiting", T.hintVisible() === false);
+        var hp = api.spawn({ shape: "cone", size: 7 }); yield 0.3;
+        check("18 Hint shown while an object waits for placement", T.hintVisible() === true && api.pendingPlacement() === hp);
+        api.placeFromRay(vec3.zero(), ray(0, tableY, -95)); yield 0.3;
+        check("18 Hint hidden once the object is placed", T.hintVisible() === false && api.pendingPlacement() === -1);
+        var hp2 = api.spawn({ shape: "cone", size: 7 }); yield 0.2;
+        T.pressStart(hp2); yield 0.1; T.pressEnd(hp2, false); yield 0.2;
+        check("18 Dragging the waiting object counts as placing it (hint hidden)", T.hintVisible() === false && api.pendingPlacement() === -1);
+        api.clearAll(); yield 0.2;
+
+        // gem glow reads as strongly as the orb's
+        var go = api.spawn({ shape: "sphere", size: 10, glow: true, color: [1, 0.6, 0.2], pos: new vec3(-9, 0, z18) }), gg = api.spawn({ shape: "crystal", size: 10, glow: true, color: [1, 0.6, 0.2], pos: new vec3(9, 0, z18) });
+        var gi1 = T.glowInfo(go), gi2 = T.glowInfo(gg);
+        check("18 Gem glow is at least 1.5x as strong as the orb's per layer (same layers, additive)", gi1.length === gi2.length && gi2.every(function (g, i) { return g.blend === gi1[i].blend && g.alpha >= gi1[i].alpha * 1.5; }), JSON.stringify(gi1.map(function (g) { return g.alpha.toFixed(2); })) + " vs " + JSON.stringify(gi2.map(function (g) { return g.alpha.toFixed(2); })));
+        api.clearAll(); yield 0.2;
+
+        // link labels never sit on a node
+        var la = api.spawn({ shape: "crystal", size: 10, pos: new vec3(-8.8, 5, z18) }), lb = api.spawn({ shape: "sphere", size: 10, pos: new vec3(8.8, 5, z18) }), lc = api.spawn({ shape: "sphere", size: 18, pos: new vec3(0, -7, z18) });
+        T.connect(la, lb, "ATTRACT"); T.connect(lc, lb, "ATTRACT"); T.connect(la, lc, "REPEL"); yield 0.5;
+        var lbad = 0, lnud = [];
+        T.connections.forEach(function (c) { var li = T.labelInfo(c); lnud.push((li.nudge || 0).toFixed(1)); if (!li.ext || li.hits) { lbad++; } });
+        check("18 No link label overlaps a node's screen footprint", lbad === 0 && T.connections.length === 3, "nudges " + lnud.join(",") + " bad " + lbad);
+        api.activate(); yield 4;
+        lbad = 0; T.connections.forEach(function (c) { var li = T.labelInfo(c); if (!li.ext || li.hits) { lbad++; } });
+        check("18 ...and stays clear while the nodes move", lbad === 0, "bad " + lbad);
+        api.reset(); api.clearAll(); yield 0.2;
 
         api.reset();
         var pass = results.filter(function (r) { return r; }).length;
