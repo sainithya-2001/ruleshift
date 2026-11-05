@@ -36,7 +36,6 @@ export class RuleShiftControls extends BaseScriptComponent {
     if (st === this.lastState) return
     this.lastState = st
     this.mainContent.text = st === "live" ? "Pause" : st === "paused" ? "Resume" : "Activate"
-    print("RULESHIFT UI main button label -> " + this.mainContent.text)
   }
 
   private makeButton(name: string, label: string, x: number) {

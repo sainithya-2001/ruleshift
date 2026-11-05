@@ -52,7 +52,7 @@ function applyColor(c) {
     if (c.rmv && c.rmv.mainPass) {
         c.rmv.mainPass.baseColor = RULE_COLOR[c.rule];
         if (c.haloRmv) { var k = RULE_COLOR[c.rule]; c.haloRmv.mainPass.baseColor = new vec4(k.r * 0.35, k.g * 0.35, k.b * 0.35, 0.35); }
-    } else { print("RULESHIFT no mainPass for " + c.visual.name); }
+    }
 }
 function addConnection(a, b, rule, visual) {
     if (a < 0 || b < 0 || !visual) { return null; }
@@ -71,7 +71,6 @@ function addConnection(a, b, rule, visual) {
     var mn = pmesh.aabbMin, mx = pmesh.aabbMax;
     c.mW = Math.max(mx.x - mn.x, 0.0001); c.mL = Math.max(mx.y - mn.y, 0.0001); c.mD = Math.max(mx.z - mn.z, 0.0001);
     c.mCenter = new vec3((mx.x + mn.x) / 2, (mx.y + mn.y) / 2, (mx.z + mn.z) / 2);
-    print("RULESHIFT link mesh aabb " + c.mW.toFixed(2) + "x" + c.mL.toFixed(2) + "x" + c.mD.toFixed(2));
     visual.getTransform().setLocalScale(vec3.one());
     c.collider = visual.getComponent("Component.ColliderComponent");
     c.thickDiam = nodes[a].radius * 0.5;   // visible cylinder diameter = half the sphere radius (radius R/4)
@@ -232,7 +231,7 @@ script.api.toggle = function () {   // Activate -> Pause -> Resume -> Pause ...
 };
 script.api.reset = resetWorld;
 
-var elapsed = 0, lastToggle = 0, lastLog = -1;
+var elapsed = 0, lastToggle = 0;
 script.createEvent("UpdateEvent").bind(function (e) {
     var dt = Math.min(e.getDeltaTime(), 0.05);
     lastDt = dt;
@@ -251,13 +250,6 @@ script.createEvent("UpdateEvent").bind(function (e) {
     labelAlpha += ((state === "live" ? 0.2 : 1) - labelAlpha) * Math.min(1, dt * 6);
     connections.forEach(updateLabel);
     connections.forEach(updateVisual);
-    if (Math.floor(elapsed) !== lastLog) {
-        lastLog = Math.floor(elapsed);
-        print("RULESHIFT t=" + elapsed.toFixed(0) + " " + connections.map(function (c) {
-            return nodes[c.a].obj.name + "-" + nodes[c.b].obj.name + ":" + c.rule + " d=" +
-                nodes[c.a].pos.distance(nodes[c.b].pos).toFixed(1);
-        }).join(" | "));
-    }
 });
 
 // SIK hand-interaction events must be subscribed during OnStartEvent.
@@ -284,7 +276,4 @@ try {
     pt.setWorldRotation(quat.fromEulerAngles(0, 0, Math.PI / 2));   // mesh long axis is Y; lay it along X
     pt.setWorldScale(new vec3(bh / mc.mW, bw / mc.mL, bd / mc.mD));
     pt.setWorldPosition(new vec3(0, CTRL_Y, WORLD_Z - 1));
-    print("RULESHIFT backing created");
 } catch (err) { print("RULESHIFT backing failed: " + err); }
-print("RULESHIFT radii: " + nodes.map(function (n) { return n.radius.toFixed(1); }).join(","));
-print("RULESHIFT system: " + nodes.length + " nodes, " + connections.length + " connections");
