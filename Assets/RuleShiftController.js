@@ -193,6 +193,67 @@ function syncDragged() {   // a grabbed sphere owns its position; physics resume
         n.pos = new vec3(p.x, p.y, p.z); n.vel = vec3.zero(); n.force = vec3.zero();
     });
 }
+
+// ---- Guided challenge panel ----
+var goalStage = 0;   // 0: touch goal, 1: celebrating goal 1, 2: triangle goal, 3: all done
+var goalTimer = 0, goalPulse = -1, settleTime = 0;
+var GOAL_1 = "Make the yellow sphere touch the pink one\n\u2014 without dragging it.";
+var GOAL_2 = "Get all three spheres to settle in a triangle.";
+var GOAL_2_TWO = "Get all three spheres to\nsettle in a triangle.";
+var goalTr, goalText, nextText;
+function makeText(name, size, pos, col) {
+    var o = global.scene.createSceneObject(name);
+    var t = o.createComponent("Component.Text");
+    t.size = size; t.depthTest = false;
+    t.horizontalAlignment = HorizontalAlignment.Center;
+    t.verticalAlignment = VerticalAlignment.Center;
+    t.textFill.color = col;
+    o.getTransform().setWorldPosition(pos);
+    return { obj: o, text: t, tr: o.getTransform() };
+}
+(function () {
+    var top = -1e9, z = 0;
+    nodes.forEach(function (n) { top = Math.max(top, n.initial.y); z += n.initial.z / nodes.length; });
+    var parent = nodes[0].obj.getParent();
+    var base = parent ? parent.getTransform().getWorldPosition().y : 0;
+    var g = makeText("Goal Text", 100, new vec3(0, top + base + 25, z), new vec4(1, 1, 1, 1));
+    var nx = makeText("Next Text", 62, new vec3(0, top + base + 11, z), new vec4(0.75, 0.9, 1, 0.9));
+    goalTr = g.tr; goalText = g.text; nextText = nx.text;
+    goalText.text = GOAL_1;
+    nextText.text = "Next: " + GOAL_2;
+})();
+function startGoalPulse() { goalPulse = 0; }
+function isTriangle() {
+    var p = nodes.map(function (n) { return n.pos; });
+    var d = [p[0].distance(p[1]), p[1].distance(p[2]), p[0].distance(p[2])];
+    var mean = (d[0] + d[1] + d[2]) / 3;
+    var minD = Math.min(d[0], d[1], d[2]), maxD = Math.max(d[0], d[1], d[2]);
+    var minGap = nodes[0].radius * 2;
+    // roughly even sides, spheres not overlapping, and not a straight line (longest < sum of others * 0.9)
+    return minD > minGap && maxD < mean * 1.5 && maxD < (d[0] + d[1] + d[2] - maxD) * 0.9;
+}
+function updateGoal(dt) {
+    if (goalPulse >= 0) {
+        goalPulse += dt;
+        var k = goalPulse >= 0.6 ? 0 : Math.sin(Math.PI * goalPulse / 0.6);
+        if (goalPulse >= 0.6) { goalPulse = -1; }
+        goalTr.setLocalScale(vec3.one().uniformScale(1 + 0.3 * k));
+    }
+    if (goalStage === 0) {
+        if (state === "live" && !nodes[2].dragging && nodes[2].pos.distance(nodes[0].pos) <= nodes[2].radius + nodes[0].radius) {
+            goalStage = 1; goalTimer = 0; startGoalPulse();
+            goalText.text = "Rule rewritten! \u2728";
+            print("RULESHIFT goal 1 complete");
+        }
+    } else if (goalStage === 1) {
+        goalTimer += dt;
+        if (goalTimer > 3) { goalStage = 2; settleTime = 0; goalText.text = GOAL_2_TWO; nextText.text = ""; }
+    } else if (goalStage === 2) {
+        var still = nodes.every(function (n) { return n.vel.length < 1.5 && !n.dragging; });
+        settleTime = (state === "live" && still && isTriangle()) ? settleTime + dt : 0;
+        if (settleTime > 1.5) { goalStage = 3; startGoalPulse(); goalText.text = "Triangle! Rule rewritten! \u2728"; print("RULESHIFT goal 2 complete"); }
+    }
+}
 var UP = new vec3(0, 1, 0);
 var POP_TIME = 0.4, lastDt = 0.016;
 var LABEL_TEXT = { ATTRACT: "ATTRACT", REPEL: "REPEL", COLLISION_TRIGGER: "ON COLLISION" };
@@ -242,6 +303,7 @@ function resetWorld() {
         n.tr.setLocalPosition(n.pos); n.tr.setLocalScale(n.baseScale);
     });
     connections.forEach(function (c) { c.cooldownUntil = 0; updateVisual(c); });
+    goalStage = 0; settleTime = 0; goalText.text = GOAL_1; nextText.text = "Next: " + GOAL_2;
     setState("creation");
 }
 script.api.getState = function () { return state; };
@@ -271,6 +333,7 @@ script.createEvent("UpdateEvent").bind(function (e) {
         checkCollisions();
     }
     updatePulses(dt);
+    updateGoal(dt);
     labelAlpha += ((state === "live" ? 0.2 : 1) - labelAlpha) * Math.min(1, dt * 6);
     connections.forEach(updateLabel);
     connections.forEach(updateVisual);
