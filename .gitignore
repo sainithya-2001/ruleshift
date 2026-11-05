@@ -42,3 +42,14 @@ ls-live-instance.json
 Packages/Bitmoji 3D.lsc
 Packages/Bitmoji 3D.lsc.meta
 Plugins/b5c0453c-8076-44a8-aea3-4b878299e9f9/
+
+# Snap3D / Remote Service Gateway token: NEVER commit. Local-only file(s).
+Assets/Scripts/snapToken.local.ts
+Assets/Scripts/snapToken.local.ts.meta
+Assets/Scripts/snapToken.local.js
+Assets/Scripts/snapToken.local.js.meta
+*.local.ts
+*.local.js
+*.token
+.env
+.env.*
