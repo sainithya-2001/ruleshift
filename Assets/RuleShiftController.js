@@ -62,6 +62,12 @@ function addConnection(a, b, rule, visual) {
     var vs = visual.getTransform().getLocalScale();
     c.thick = LINK_THICKNESS; c.pop = -1; c.baseScaleX = vs.x; c.baseScaleZ = vs.z;
     connections.push(c);
+    var lo = global.scene.createSceneObject("Rule Label " + connections.length);
+    c.label = lo.createComponent("Component.Text");
+    c.label.size = 90; c.label.depthTest = true;
+    c.label.horizontalAlignment = HorizontalAlignment.Center;
+    c.label.verticalAlignment = VerticalAlignment.Center;
+    c.labelTr = lo.getTransform();
     applyColor(c);
     return c;
 }
@@ -152,6 +158,15 @@ function integrate(dt) {
 
 var UP = new vec3(0, 1, 0);
 var POP_TIME = 0.4, lastDt = 0.016;
+var LABEL_TEXT = { ATTRACT: "ATTRACT", REPEL: "REPEL", COLLISION_TRIGGER: "ON COLLISION" };
+var labelAlpha = 1;
+function updateLabel(c) {
+    var A = nodes[c.a].pos, B = nodes[c.b].pos;
+    c.labelTr.setWorldPosition(A.add(B).uniformScale(0.5).add(new vec3(0, 12, 18)));
+    c.label.text = LABEL_TEXT[c.rule];
+    var k = RULE_COLOR[c.rule];
+    c.label.textFill.color = new vec4(k.r, k.g, k.b, labelAlpha);
+}
 function updateVisual(c) {
     var A = nodes[c.a].pos, B = nodes[c.b].pos;
     var delta = B.sub(A);
@@ -209,6 +224,8 @@ script.createEvent("UpdateEvent").bind(function (e) {
         checkCollisions();
     }
     updatePulses(dt);
+    labelAlpha += ((state === "live" ? 0.2 : 1) - labelAlpha) * Math.min(1, dt * 6);
+    connections.forEach(updateLabel);
     connections.forEach(updateVisual);
     if (Math.floor(elapsed) !== lastLog) {
         lastLog = Math.floor(elapsed);
