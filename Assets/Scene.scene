@@ -1139,6 +1139,7 @@
       strength: 0.800000
       debugAutoToggle: false
       demoPreset: false
+      camera: !<reference.Camera> 00000000-0000-0065-0000-000000000065
   ScriptTypes:
     "":
       {}

@@ -28,6 +28,7 @@
   ExportUid: 00000000-0000-0000-0000-000000000000
   PackagePolicy: CanBeUnpacked
   ScriptInputsHidden:
+    camera: false
     debugAutoToggle: false
     demoPreset: false
     linkTemplate: false
@@ -47,6 +48,7 @@
       strength: 0.800000
       debugAutoToggle: true
       demoPreset: false
+      camera: !<reference.Camera> 00000000-0000-0000-0000-000000000000
   ScriptTypes:
     -
       {}

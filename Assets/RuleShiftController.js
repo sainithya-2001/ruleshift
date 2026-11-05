@@ -3,6 +3,7 @@
 // @input float strength = 0.8
 // @input bool debugAutoToggle = false
 // @input bool demoPreset = false
+// @input Component.Camera camera
 
 // RULESHIFT system: a dynamic set of nodes (max MAX_NODES) + links {A,B,rule,visual}.
 // Nodes are spawned from the Create palette (or the demo preset). Each frame every active link adds a force to
@@ -205,6 +206,7 @@ function spawnNode(opts) {
     if (shape === "sphere" && opts.shine !== false) { addShine(n); }
     if (opts.glow) { addGlow(n); }
     pendingBinds.push({ kind: "node", n: n });
+    pendingPlace = n;
     print("RULESHIFT spawned " + obj.name + " (" + nodes.length + "/" + MAX_NODES + ")");
     return n;
 }
@@ -216,12 +218,91 @@ function deleteNode(n) {
     }
     var nm = n.obj.name;
     if (selNode === n) { selNode = null; }
+    if (pendingPlace === n) { pendingPlace = null; }
     nodes.splice(i, 1);
     n.obj.destroy();
     refreshConnections();
     print("RULESHIFT deleted " + nm + " (" + nodes.length + " left)");
     return true;
 }
+
+// ---------- Placement: a pinch on a surface puts the newest object there ----------
+// Surfaces: a virtual table plane (always available), with WorldQuery tried first when it returns hits.
+var TABLE_Y = -14;               // virtual table surface, just above the control buttons
+var pendingPlace = null;         // the newest spawned object waits for a pinch to be placed
+var hintObj = null, hintText = null;
+(function () {
+    var h = makeText("Place Hint", 80, new vec3(0, 26, WORLD_Z), new vec4(0.75, 1, 0.85, 1));
+    hintObj = h.obj; hintText = h.text; hintText.text = "Pinch a surface to place it"; hintObj.enabled = false;
+})();
+var wqSession = null, wqStatus = "untested";
+function initWorldQuery() {
+    try {
+        var mod = require("LensStudio:WorldQueryModule");
+        var opts = HitTestSessionOptions.create();
+        opts.filter = true;
+        wqSession = mod.createHitTestSessionWithOptions(opts);
+        wqSession.start();
+        wqStatus = "session created";
+    } catch (e) { wqSession = null; wqStatus = "unavailable: " + e; }
+    print("RULESHIFT WorldQuery " + wqStatus);
+}
+function planeHit(o, d) {   // intersect the ray with the table plane; looking at or above the horizon never hits it
+    if (d.y > -0.001) { return null; }
+    var t = (TABLE_Y - o.y) / d.y;
+    return o.add(d.uniformScale(t));
+}
+function worldDepthHit(o, d) {   // fallback: where the ray crosses the world's depth plane
+    var t = (WORLD_Z - o.z) / (Math.abs(d.z) > 0.001 ? d.z : -0.001);
+    return o.add(d.uniformScale(Math.max(t, 1)));
+}
+function placeNodeAt(n, hit, via) {
+    var onTable = via === "plane";
+    var p = new vec3(Math.max(-BOX_X, Math.min(BOX_X, hit.x)),
+        onTable ? TABLE_Y + n.radius : hit.y,
+        Math.max(WORLD_Z - BOX_Z, Math.min(WORLD_Z + BOX_Z, hit.z)));
+    p = new vec3(p.x, Math.max(BOX_YMIN, Math.min(BOX_YMAX, p.y)), p.z);
+    n.pos = p; n.initial = new vec3(p.x, p.y, p.z); n.vel = vec3.zero(); n.force = vec3.zero();
+    n.tr.setLocalPosition(p);
+    if (pendingPlace === n) { pendingPlace = null; }
+    print("RULESHIFT placed " + n.obj.name + " via " + via + " at (" + p.x.toFixed(1) + ", " + p.y.toFixed(1) + ", " + p.z.toFixed(1) + ")");
+}
+// Ray in world space -> place the pending object. Returns the surface used ("plane"/"world") or null when nothing was pending.
+function placeFromRay(o, d) {
+    if (!pendingPlace) { return null; }
+    var n = pendingPlace;
+    var hit = planeHit(o, d);
+    if (hit) { placeNodeAt(n, hit, "plane"); return "plane"; }
+    placeNodeAt(n, worldDepthHit(o, d), "world");
+    return "world";
+}
+// Screen point (0..1) -> ray; ignores presses that land on a button, object or link.
+var probe = null;
+function placeAtScreen(sp) {
+    if (!pendingPlace || !script.camera) { return null; }
+    var cam = script.camera, o = cam.getTransform().getWorldPosition();
+    var w = cam.screenSpaceToWorldSpace(sp, 100);
+    var d = w.sub(o); d = d.uniformScale(1 / Math.max(d.length, 0.0001));
+    var blocked = false;
+    try {
+        probe = probe || Physics.createGlobalProbe();
+        probe.rayCast(o, o.add(d.uniformScale(400)), function (hit) { if (hit && hit.collider) { blocked = true; } });
+    } catch (e) { }
+    if (blocked) { return "blocked"; }
+    var target = pendingPlace;
+    if (wqSession) {   // real surface first; when it returns no hit the virtual plane is used
+        try {
+            wqSession.hitTest(o, o.add(d.uniformScale(400)), function (r) {
+                if (pendingPlace !== target) { return; }
+                if (r && r.position) { wqStatus = "hits"; placeNodeAt(target, r.position, "worldquery"); }
+                else { wqStatus = "no hits (plane fallback)"; placeFromRay(o, d); }
+            });
+            return "worldquery-pending";
+        } catch (e2) { wqStatus = "error: " + e2; }
+    }
+    return placeFromRay(o, d);
+}
+script.createEvent("TouchStartEvent").bind(function (e) { placeAtScreen(e.getTouchPosition()); });
 
 // ---------- links ----------
 var HALO_SCALE = 1.7;
@@ -552,7 +633,7 @@ function clearAll() {
     for (var k = slots.length - 1; k >= 0; k--) { destroySlot(slots[k]); }
     for (var i = nodes.length - 1; i >= 0; i--) { nodes[i].obj.destroy(); }
     nodes.length = 0; refreshConnections();
-    selNode = null; setGoalEnabled(false);
+    selNode = null; pendingPlace = null; setGoalEnabled(false);
     setState("creation");
     print("RULESHIFT cleared all");
 }
@@ -564,6 +645,7 @@ function loadDemo() {   // the starting set used for the video: pink, cyan, yell
     var ab = slotFor(a, b, true), bc = slotFor(b, c, true); slotFor(a, c, true);   // slot order AB, BC, AC
     activateLink(ab, RULES.ATTRACT, true); activateLink(bc, RULES.REPEL, true);
     setGoalEnabled(true);
+    pendingPlace = null;
 }
 
 script.api.getState = function () { return state; };
@@ -579,6 +661,11 @@ script.api.clearLinks = clearLinks;
 script.api.clearAll = clearAll;
 script.api.loadDemo = loadDemo;
 script.api.spawn = function (opts) { var n = spawnNode(opts); return n ? nodeIndex(n) : -1; };
+script.api.pendingPlacement = function () { return pendingPlace ? nodeIndex(pendingPlace) : -1; };
+script.api.placeFromRay = placeFromRay;
+script.api.placeAtScreen = placeAtScreen;
+script.api.wqStatus = function () { return wqStatus; };
+script.api.tableY = TABLE_Y;
 script.api.count = function () { return nodes.length; };
 script.api.maxNodes = MAX_NODES;
 script.api.deleteSelected = function () { return selNode ? deleteNode(selNode) : false; };
@@ -667,12 +754,22 @@ script.createEvent("UpdateEvent").bind(function (e) {
     if (state === "live") { checkCollisions(); }
     updatePulses(dt);
     updateSelection();
+    hintObj.enabled = !!pendingPlace && !goalEnabled;
     updateGoal(Math.min(e.getDeltaTime(), 0.25));   // real time, so goal timers don't slow down at low frame rates
     connections.forEach(updateLabel);
     connections.forEach(updateVisual);
 });
 script.createEvent("OnStartEvent").bind(function () {
     if (script.demoPreset) { loadDemo(); }
+    initWorldQuery();
+    var wqDelay = script.createEvent("DelayedCallbackEvent");
+    wqDelay.bind(function () {   // one-time Preview probe: does WorldQuery return real hits here?
+        if (!wqSession) { return; }
+        try {
+            wqSession.hitTest(new vec3(0, 0, 0), new vec3(0, -50, -100), function (r) { wqStatus = r && r.position ? "hits" : "no hits in Preview"; print("RULESHIFT WorldQuery Preview probe: " + wqStatus); });
+        } catch (e) { wqStatus = "probe error: " + e; print("RULESHIFT WorldQuery Preview probe: " + wqStatus); }
+    });
+    wqDelay.reset(2);
 });
 
 var CTRL_Y = -22;

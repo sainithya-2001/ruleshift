@@ -228,6 +228,39 @@ if (script.runTests) {
         api.clearAll(); yield 0.1;
         check("11 Clear all after creating removes everything", api.count() === 0 && T.slots.length === 0);
 
+        // 12. Placement: a pinch on a surface puts the newest object there (virtual table plane; WorldQuery tried first)
+        api.clearAll(); yield 0.1;
+        var pi0 = api.spawn({ shape: "cube", sizeKey: "M", color: [1, 0.5, 0] }); yield 0.1;
+        check("12 Spawned object waits for placement", api.pendingPlacement() === pi0 && pi0 === 0);
+        var pn = nodes[pi0], tableY = api.tableY;
+        var ray = function (x, y, zz) { var v = new vec3(x, y, zz); return v.uniformScale(1 / v.length); };
+        var via = api.placeFromRay(vec3.zero(), ray(8, tableY, -95));
+        check("12 Ray at the table hits the plane, object rests on it", via === "plane" && Math.abs(pn.pos.x - 8) < 0.05 && Math.abs(pn.pos.y - (tableY + pn.radius)) < 0.05 && Math.abs(pn.pos.z + 95) < 0.05, "pos " + pn.pos.x.toFixed(2) + "," + pn.pos.y.toFixed(2) + "," + pn.pos.z.toFixed(2));
+        check("12 Placement clears the pending state", api.pendingPlacement() === -1);
+        check("12 Placement moved the scene object too", pn.tr.getLocalPosition().distance(pn.pos) < 0.001);
+        check("12 Placed position becomes the Reset position", pn.initial.distance(pn.pos) < 0.001);
+        check("12 Pinch with nothing pending places nothing", api.placeFromRay(vec3.zero(), ray(-8, tableY, -95)) === null && Math.abs(pn.pos.x - 8) < 0.05);
+        api.reset(); yield 0.1;
+        check("12 Reset keeps the placed position", Math.abs(pn.pos.x - 8) < 0.05 && Math.abs(pn.pos.y - (tableY + pn.radius)) < 0.05);
+        // far hit is clamped into the world box
+        var pj = api.spawn({ shape: "cone", sizeKey: "S" }); yield 0.1;
+        api.placeFromRay(vec3.zero(), ray(60, tableY, -300));
+        var pc = nodes[pj];
+        check("12 Far placement is clamped inside the world box", Math.abs(pc.pos.x) <= T.box.x + 0.01 && Math.abs(pc.pos.z + 95) <= T.box.zr + 0.01 && pc.pos.y >= T.box.yMin - 0.01, pc.pos.x.toFixed(1) + "," + pc.pos.y.toFixed(1) + "," + pc.pos.z.toFixed(1));
+        // ray above the horizon never hits the table: falls back to the world depth plane
+        var pk2 = api.spawn({ shape: "torus", sizeKey: "S" }); yield 0.1;
+        var via2 = api.placeFromRay(vec3.zero(), ray(-6, 4, -95));
+        check("12 Ray above the table falls back to the world plane", via2 === "world" && Math.abs(nodes[pk2].pos.x + 6) < 0.05 && Math.abs(nodes[pk2].pos.y - 4) < 0.05, "via " + via2);
+        // screen-space path (camera ray + physics probe + WorldQuery attempt + plane fallback)
+        var pm = api.spawn({ shape: "crystal", sizeKey: "M" }); yield 0.1;
+        var res = api.placeAtScreen(new vec2(0.5, 0.82)); yield 1.2;
+        check("12 Screen pinch on empty space places the object (WorldQuery: " + api.wqStatus() + ")", api.pendingPlacement() === -1 && Math.abs(nodes[pm].pos.y - (tableY + nodes[pm].radius)) < 0.05 && Math.abs(nodes[pm].pos.x) <= T.box.x + 0.01, "res " + res + " pos " + nodes[pm].pos.x.toFixed(1) + "," + nodes[pm].pos.y.toFixed(1) + "," + nodes[pm].pos.z.toFixed(1));
+        // placed objects still behave: collide, stay in bounds
+        api.activate(); yield 1;
+        var inBox = nodes.every(function (n) { return Math.abs(n.pos.x) <= T.box.x + 0.01 && n.pos.y >= T.box.yMin - 0.01 && n.pos.y <= T.box.yMax + 0.01; });
+        check("12 Placed objects stay in the world box while live", inBox);
+        api.clearAll(); yield 0.1;
+
         api.reset();
         var pass = results.filter(function (r) { return r; }).length;
         print("RULESHIFT TEST SUMMARY: " + pass + "/" + results.length + " PASS" + (pass === results.length ? " - ALL PASS" : " - FAILURES"));
