@@ -36,3 +36,6 @@ STEP 2 — only if the TS errors block Preview:
 
 Final report: max 8 lines.
 
+
+
+NOTE: Do not install or use AiPreviewAgent*, Leaf, or PreviewInteractTool. They import InteractionKit.lspkg, don't match SpectaclesInteractionKit, and break the TS compile.

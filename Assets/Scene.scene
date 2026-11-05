@@ -1096,18 +1096,21 @@
   Enabled: true
   ScriptAsset: !<reference> c267126f-a7b1-416b-9dc7-5cdeeb3a03e3
   ScriptInputsDefault:
+    nodeC: true
+    connBC: true
     strength: true
-    debugAutoToggle: true
   ScriptTypesDefault:
     {}
   ScriptInputs:
     "":
       nodeA: !<reference.SceneObject> 08b9edd8-4a03-43f3-9bb4-fafbc26a56bf
       nodeB: !<reference.SceneObject> b512a96f-3452-49fe-8385-a48e85922abd
-      connection: !<reference.SceneObject> 74ee3531-c066-4408-8fe9-5257b060f267
+      nodeC: !<reference.SceneObject> 00000000-0000-0000-0000-000000000000
+      connAB: !<reference.SceneObject> 74ee3531-c066-4408-8fe9-5257b060f267
+      connBC: !<reference.SceneObject> 00000000-0000-0000-0000-000000000000
       interactable: !<reference.ScriptComponent> 2b19e007-598c-4a1e-8550-7e2d3d8459dc
       strength: 0.800000
-      debugAutoToggle: true
+      debugAutoToggle: false
   ScriptTypes:
     "":
       {}
