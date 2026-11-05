@@ -261,6 +261,32 @@ if (script.runTests) {
         check("12 Placed objects stay in the world box while live", inBox);
         api.clearAll(); yield 0.1;
 
+        // 13: voice transcript parser (the ASR call itself is verified from Preview logs)
+        var VC = [
+            ["a big glowing red crystal", { shape: "crystal", color: 0, sizeKey: "L", glow: true }],
+            ["small heavy blue cube", { shape: "cube", color: 1, sizeKey: "S", weight: "heavy" }],
+            ["make me a tiny green ball", { shape: "sphere", color: 3, sizeKey: "S" }],
+            ["Huge bouncy purple donut!", { shape: "torus", color: 5, sizeKey: "L", bounce: "high" }],
+            ["a yellow gem, bright and light", { shape: "crystal", color: 2, glow: true, weight: "light" }],
+            ["orange cone", { shape: "cone", color: 4 }],
+            ["glowing cyan ring", { shape: "torus", color: 1, glow: true }],
+            ["heavy large pink box", { shape: "cube", color: 0, sizeKey: "L", weight: "heavy" }],
+            ["two little orbs", { shape: "sphere", sizeKey: "S" }],
+            ["turquoise diamond that is shiny", { shape: "crystal", color: 1, glow: true }],
+            ["a big red thing", { found: false }],
+            ["glowing heavy blue", { found: false }],
+            ["", { found: false }]
+        ];
+        VC.forEach(function (c) {
+            var r = api.parseVoice(c[0]), ex = c[1], ok = true, k;
+            if (ex.found === false) { ok = r.found === false; }
+            else { ok = r.found === true; for (k in ex) { if (r[k] !== ex[k]) { ok = false; } } }
+            check("13 Voice parse: '" + c[0] + "'", ok, JSON.stringify(r));
+        });
+        var vp = api.parseVoice("a cube");
+        check("13 Voice parse: missing parameters stay null (palette defaults apply)", vp.color === null && vp.sizeKey === null && vp.glow === null && vp.weight === null && vp.bounce === null);
+        check("13 Voice parse: first shape word wins", api.parseVoice("a cone and a cube").shape === "cone");
+
         api.reset();
         var pass = results.filter(function (r) { return r; }).length;
         print("RULESHIFT TEST SUMMARY: " + pass + "/" + results.length + " PASS" + (pass === results.length ? " - ALL PASS" : " - FAILURES"));

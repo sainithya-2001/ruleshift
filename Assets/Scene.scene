@@ -2010,6 +2010,8 @@
       iconAdd: !<reference.Texture> fa8784e1-392b-4a05-a6cc-55cb2dca36d1
       iconClose: !<reference.Texture> 14ce1f8d-2a45-40bc-8933-110c2a45c082
       iconTrash: !<reference.Texture> 8a22d2a7-4fe9-4a15-bdaf-c9b834f1f73e
+      iconMic: !<reference.Texture> 01b8133f-65f8-42fc-987d-7a6203a3543b
+      iconMicOn: !<reference.Texture> ff98f1c4-9309-4ca3-9614-f7ae82dcf689
   ScriptTypes:
     "":
       {}

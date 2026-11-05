@@ -35,8 +35,16 @@ export class RuleShiftControls extends BaseScriptComponent {
   @input iconAdd: Texture
   @input iconClose: Texture
   @input iconTrash: Texture
+  @input iconMic: Texture
+  @input iconMicOn: Texture
 
   private mainPill: Pill
+  private speakPill: Pill
+  private asrModule: any = null
+  private listening = false
+  private heard = ""
+  private caption: Text
+  private captionTimer = 0
   private lastState: string = ""
   private palette: SceneObject
   private paletteParts: SceneObject[] = []
@@ -59,19 +67,26 @@ export class RuleShiftControls extends BaseScriptComponent {
       this.controller.api.onState((st: string) => this.onState(st))
       this.setPalette(false)
     })
-    this.createEvent("UpdateEvent").bind(() => this.updateFloating())
+    this.createEvent("UpdateEvent").bind(() => {
+      this.updateFloating()
+      if (this.captionTimer > 0) {
+        this.captionTimer -= getDeltaTime()
+        if (this.captionTimer <= 0) this.caption.sceneObject.enabled = false
+      }
+    })
+    this.buildCaption()
   }
 
   // ---- Toolbar: one compact row of icon + label pills along the bottom edge ----
   private buildToolbar() {
     const api = this.controller.api
     const h = 6.3
-    const labels = ["Activate", "Reset", "Create", "Clear links", "Clear all"]
-    const icons = [this.iconPlay, this.iconReset, this.iconAdd, this.iconClose, this.iconTrash]
-    let widths = [10.4, 8.8, 9.6, 12.4, 10.8]
-    const gap = 0.6
+    const labels = ["Activate", "Reset", "Create", "Speak", "Clear links", "Clear all"]
+    const icons = [this.iconPlay, this.iconReset, this.iconAdd, this.iconMic, this.iconClose, this.iconTrash]
+    let widths = [8.9, 7.6, 8.0, 7.6, 10.1, 9.2]
+    const gap = 0.3
     const total = widths.reduce((a, b) => a + b, 0) + gap * 4
-    const k = Math.min(1, (this.halfW * 2 - 3) / total)
+    const k = Math.min(1, (this.halfW * 2 - 1.5) / total)
     widths = widths.map((w) => w * k)
     const y = -this.halfH + 0.8 + h / 2
     api.makePlate("Toolbar Strip", total * k + 1.4, h + 1.2, 0.4, new vec3(0, y, Z - 1.2), DARK, -8)
@@ -80,15 +95,111 @@ export class RuleShiftControls extends BaseScriptComponent {
     labels.forEach((label, i) => {
       const cx = x + widths[i] / 2
       api.makePlate("Pill " + label, widths[i], h, 0.4, new vec3(cx, y, Z - 0.8), PILL, -7)
-      pills.push(this.makePill(this.sceneObject, "Pill" + i, label, icons[i], new vec3(cx, y, Z + 0.5), new vec2(widths[i], h), 54, false, 3))
+      pills.push(this.makePill(this.sceneObject, "Pill" + i, label, icons[i], new vec3(cx, y, Z + 0.5), new vec2(widths[i], h), 44, false, 2.2))
       x += widths[i] + gap * k
     })
     this.mainPill = pills[0]
     pills[0].button.onTriggerUp.add(() => this.controller.api.toggle())
     pills[1].button.onTriggerUp.add(() => this.controller.api.reset())
     pills[2].button.onTriggerUp.add(() => this.setPalette(!this.palette.enabled))
-    pills[3].button.onTriggerUp.add(() => this.controller.api.clearLinks())
-    pills[4].button.onTriggerUp.add(() => this.controller.api.clearAll())
+    this.speakPill = pills[3]
+    pills[3].button.onTriggerUp.add(() => this.toggleSpeak())
+    pills[4].button.onTriggerUp.add(() => this.controller.api.clearLinks())
+    pills[5].button.onTriggerUp.add(() => this.controller.api.clearAll())
+  }
+
+  // ---- Voice creation: ASR transcript -> keyword parser (in the controller) -> spawn ----
+  private buildCaption() {
+    const so = global.scene.createSceneObject("Voice Caption")
+    this.caption = so.createComponent("Component.Text") as Text
+    this.caption.size = 90
+    this.caption.depthTest = false
+    this.caption.horizontalAlignment = HorizontalAlignment.Center
+    this.caption.verticalAlignment = VerticalAlignment.Center
+    this.caption.textFill.color = new vec4(1, 1, 1, 1)
+    this.caption.renderOrder = 100
+    so.getTransform().setWorldPosition(new vec3(0, 12, Z))
+    so.enabled = false
+  }
+
+  private showCaption(text: string, secs: number) {
+    this.caption.text = text
+    this.caption.sceneObject.enabled = true
+    this.captionTimer = secs
+  }
+
+  private setListening(on: boolean) {
+    this.listening = on
+    this.speakPill.content.text = on ? "Stop" : "Speak"
+    this.speakPill.content.leadingIcon = on ? this.iconMicOn : this.iconMic
+  }
+
+  private toggleSpeak() {
+    if (this.listening) {
+      this.finishSpeech()
+      return
+    }
+    try {
+      if (!this.asrModule) this.asrModule = require("LensStudio:AsrModule")
+      const options = AsrModule.AsrTranscriptionOptions.create()
+      options.silenceUntilTerminationMs = 2000 // stop after a 2 s pause
+      options.mode = AsrModule.AsrMode.HighAccuracy
+      this.heard = ""
+      options.onTranscriptionUpdateEvent.add((e: any) => {
+        print("RULESHIFT ASR transcript: '" + e.text + "' final=" + e.isFinal)
+        if (!this.listening) return
+        this.heard = e.text
+        this.showCaption(e.text, 8)
+        if (e.isFinal) this.finishSpeech()
+      })
+      options.onTranscriptionErrorEvent.add((code: any) => {
+        print("RULESHIFT ASR error: " + code)
+        if (this.listening) {
+          this.setListening(false)
+          this.showCaption("Voice unavailable (error " + code + ")", 3)
+        }
+      })
+      this.asrModule.startTranscribing(options)
+      this.setListening(true)
+      this.showCaption("Listening… describe an object", 8)
+      print("RULESHIFT ASR session started")
+    } catch (e) {
+      print("RULESHIFT ASR start failed: " + e)
+      this.setListening(false)
+      this.showCaption("Voice unavailable", 3)
+    }
+  }
+
+  private finishSpeech() {
+    if (!this.listening) return
+    this.setListening(false)
+    try {
+      this.asrModule.stopTranscribing()
+    } catch (e) {
+      print("RULESHIFT ASR stop: " + e)
+    }
+    this.handleTranscript(this.heard)
+  }
+
+  public handleTranscript(text: string) {
+    const api = this.controller.api
+    const p = api.parseVoice(text)
+    print("RULESHIFT voice '" + text + "' -> " + JSON.stringify(p))
+    if (!p.found) {
+      this.showCaption("Try: 'a glowing blue ring'", 3)
+      return
+    }
+    const s = this.sel
+    api.spawn({
+      shape: p.shape,
+      color: COLORS[p.color !== null ? p.color : s.color],
+      glow: p.glow !== null ? p.glow : s.glow === 1,
+      sizeKey: p.sizeKey || SIZE_KEYS[s.size],
+      weight: p.weight || WEIGHT_KEYS[s.weight],
+      bounce: p.bounce || BOUNCE_KEYS[s.bounce],
+    })
+    this.setPalette(false)
+    this.showCaption(text.trim() + " ✓", 3)
   }
 
   private onState(st: string) {

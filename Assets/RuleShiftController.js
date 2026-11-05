@@ -247,7 +247,7 @@ var hintObj = null, hintText = null;
 var emptyHint = null;
 (function () {
     emptyHint = makeText("Empty Hint", 85, new vec3(0, 2, WORLD_Z), new vec4(0.85, 0.95, 1, 1)).obj;
-    emptyHint.getComponent("Component.Text").text = "Tap + Create to make your first object";
+    emptyHint.getComponent("Component.Text").text = "Tap Create to make your first object";
 })();
 function updateEmptyHint() { if (emptyHint) { emptyHint.enabled = nodes.length === 0; } }
 var wqSession = null, wqStatus = "untested";
@@ -813,7 +813,7 @@ script.createEvent("OnStartEvent").bind(function () {
         v.mesh = ring(L[0], 1); v.mainMaterial = SPHERE_MAT.clone();
         var p = v.mainPass; p.blendMode = BlendMode.Add; p.depthWrite = false;
         p.baseColor = new vec4(0.35 * L[2], 0.7 * L[2], 1.0 * L[2], L[2]);
-        v.setRenderOrder(-10 + li);
+        v.setRenderOrder(-40 + li);   // far behind the toolbar plates (-8..-5) so the rim never draws over the buttons
         o.getTransform().setWorldPosition(new vec3(0, TABLE_Y, WORLD_Z));
         o.getTransform().setLocalScale(vec3.one().uniformScale(STAGE_R));
     });
@@ -822,3 +822,34 @@ script.api.view = function () {   // visible half-extents (cm) at the world's de
     var c = script.camera, hh = Math.tan(c.fov / 2) * Math.abs(WORLD_Z);
     return { halfW: hh * c.aspect, halfH: hh, stageR: STAGE_R };
 };
+
+// ---------- Voice: transcript -> palette parameters (keyword parser; ASR itself lives in RuleShiftControls) ----------
+var VOICE_WORDS = {
+    shape: { sphere: ["ball", "orb", "sphere", "globe", "bubble", "circle"], cube: ["cube", "box", "block", "square", "dice"], crystal: ["crystal", "gem", "diamond", "jewel", "gemstone", "shard"],
+        cone: ["cone", "pyramid", "spike", "triangle"], torus: ["ring", "donut", "doughnut", "torus", "bagel", "hoop", "loop"] },
+    color: [["pink", "red", "magenta", "rose", "crimson", "ruby", "scarlet", "fuchsia"], ["cyan", "blue", "teal", "turquoise", "aqua", "sky", "azure", "navy"], ["yellow", "gold", "golden", "lemon", "amber"],
+        ["green", "lime", "emerald", "mint", "olive"], ["orange", "tangerine", "peach", "coral", "copper"], ["purple", "violet", "lavender", "indigo", "lilac", "plum"]],
+    size: { S: ["small", "tiny", "little", "mini", "teeny", "petite"], M: ["medium", "regular", "normal", "mid"], L: ["big", "large", "huge", "giant", "massive", "enormous", "jumbo"] },
+    glowOn: ["glowing", "glow", "glows", "bright", "shiny", "luminous", "radiant", "shining", "neon", "sparkling"],
+    glowOff: ["plain", "matte", "dull", "unlit"],
+    weight: { heavy: ["heavy", "weighty", "dense"], light: ["light", "lightweight", "feathery", "floaty", "airy"] },
+    bounce: { high: ["bouncy", "bounce", "bounces", "bouncing", "springy", "rubbery", "elastic"], low: ["flat", "dead", "stiff"] }
+};
+// returns { found: bool (a shape word was heard), shape, color (palette index), sizeKey, glow, weight, bounce } - missing parameters are null
+function parseVoice(text) {
+    var words = String(text || "").toLowerCase().replace(/[^a-z\s-]/g, " ").replace(/-/g, " ").split(/\s+/).filter(function (w) { return w.length > 0; });
+    var out = { found: false, shape: null, color: null, sizeKey: null, glow: null, weight: null, bounce: null };
+    function match(list, w) { return list.indexOf(w) >= 0 || (w.length > 3 && w.charAt(w.length - 1) === "s" && list.indexOf(w.slice(0, -1)) >= 0); }
+    words.forEach(function (w) {
+        var k;
+        if (out.shape === null) { for (k in VOICE_WORDS.shape) { if (match(VOICE_WORDS.shape[k], w)) { out.shape = k; break; } } }
+        if (out.color === null) { for (var ci = 0; ci < VOICE_WORDS.color.length; ci++) { if (match(VOICE_WORDS.color[ci], w)) { out.color = ci; break; } } }
+        if (out.sizeKey === null) { for (k in VOICE_WORDS.size) { if (match(VOICE_WORDS.size[k], w)) { out.sizeKey = k; break; } } }
+        if (out.glow === null) { if (match(VOICE_WORDS.glowOn, w)) { out.glow = true; } else if (match(VOICE_WORDS.glowOff, w)) { out.glow = false; } }
+        if (out.weight === null) { for (k in VOICE_WORDS.weight) { if (match(VOICE_WORDS.weight[k], w)) { out.weight = k; break; } } }
+        if (out.bounce === null) { for (k in VOICE_WORDS.bounce) { if (match(VOICE_WORDS.bounce[k], w)) { out.bounce = k; break; } } }
+    });
+    out.found = out.shape !== null;
+    return out;
+}
+script.api.parseVoice = parseVoice;
