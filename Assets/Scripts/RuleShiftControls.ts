@@ -16,6 +16,8 @@ const WEIGHT_KEYS = ["light", "heavy"]
 const BOUNCE_KEYS = ["low", "high"]
 
 const Z = -95 // the world's depth plane
+const ASR_INITIAL_WINDOW = 10 // seconds to start speaking
+const ASR_SILENCE_AFTER_SPEECH = 2 // seconds of silence after the last partial ends the phrase
 const DARK = new vec4(0.12, 0.14, 0.27, 1) // additive display: pure black would vanish, so use a deep slate
 const PILL = new vec4(0.2, 0.23, 0.42, 1)
 const WHITE = new vec4(1, 1, 1, 1)
@@ -47,7 +49,6 @@ export class RuleShiftControls extends BaseScriptComponent {
   private captionTimer = 0
   private asrStartedAt = 0
   private asrLastEventAt = 0
-  private asrSilenceLogged = false
   private asrEvents = 0
   private lastState: string = ""
   private palette: SceneObject
@@ -73,11 +74,20 @@ export class RuleShiftControls extends BaseScriptComponent {
     })
     this.createEvent("UpdateEvent").bind(() => {
       this.updateFloating()
-      if (this.listening && !this.asrSilenceLogged) {
-        const since = getTime() - this.asrLastEventAt
-        if (since >= 2) {
-          this.asrSilenceLogged = true
-          print("RULESHIFT ASR silence timeout: no transcript event for " + since.toFixed(1) + "s (events so far: " + this.asrEvents + ", session age " + (getTime() - this.asrStartedAt).toFixed(1) + "s)")
+      if (this.listening) {
+        // no timeout until the first partial arrives (10 s listening window), then 2 s of silence after the last partial
+        if (this.asrEvents === 0) {
+          const age = getTime() - this.asrStartedAt
+          if (age >= ASR_INITIAL_WINDOW) {
+            print("RULESHIFT ASR initial window expired: no transcript event in " + age.toFixed(1) + "s (events: 0)")
+            this.finishSpeech()
+          }
+        } else {
+          const since = getTime() - this.asrLastEventAt
+          if (since >= ASR_SILENCE_AFTER_SPEECH) {
+            print("RULESHIFT ASR silence timeout: " + since.toFixed(1) + "s since the last partial (events: " + this.asrEvents + ")")
+            this.finishSpeech()
+          }
         }
       }
       if (this.captionTimer > 0) {
@@ -159,13 +169,12 @@ export class RuleShiftControls extends BaseScriptComponent {
     try {
       if (!this.asrModule) this.asrModule = require("LensStudio:AsrModule")
       const options = AsrModule.AsrTranscriptionOptions.create()
-      options.silenceUntilTerminationMs = 2000 // stop after a 2 s pause
+      options.silenceUntilTerminationMs = ASR_SILENCE_AFTER_SPEECH * 1000 // native end-of-phrase; the Update timers enforce the same 2 s after the last partial
       options.mode = AsrModule.AsrMode.HighAccuracy
       this.heard = ""
       options.onTranscriptionUpdateEvent.add((e: any) => {
         this.asrEvents++
         this.asrLastEventAt = getTime()
-        this.asrSilenceLogged = false
         print("RULESHIFT ASR " + (e.isFinal ? "FINAL" : "partial") + " #" + this.asrEvents + " t+" + (getTime() - this.asrStartedAt).toFixed(1) + "s: '" + e.text + "'")
         if (!this.listening) return
         this.heard = e.text
@@ -182,7 +191,6 @@ export class RuleShiftControls extends BaseScriptComponent {
       print("RULESHIFT ASR starting: mode=HighAccuracy silenceUntilTerminationMs=" + options.silenceUntilTerminationMs)
       this.asrStartedAt = getTime()
       this.asrLastEventAt = this.asrStartedAt
-      this.asrSilenceLogged = false
       this.asrEvents = 0
       this.asrModule.startTranscribing(options)
       this.setListening(true)
