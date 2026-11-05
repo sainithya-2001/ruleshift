@@ -567,7 +567,7 @@ var BOX_X = 17, BOX_YMIN = -16, BOX_YMAX = 8, BOX_Z = 10;   // keeps objects abo
 function clampToBox(n, p) {
     var lx = Math.min(BOX_X, STAGE_R - n.radius);   // big objects stop at the stage rim
     return new vec3(Math.max(-lx, Math.min(lx, p.x)),
-        Math.max(BOX_YMIN, Math.min(BOX_YMAX, p.y)),
+        Math.max(Math.max(BOX_YMIN, -21 + n.radius), Math.min(BOX_YMAX, p.y)),   // big objects also stay above the toolbar (top edge y = -21)
         Math.max(n.initial.z - BOX_Z, Math.min(n.initial.z + BOX_Z, p.z)));
 }
 // Soft collision: any overlapping pair is pushed apart to exactly touching. A grabbed object is never pushed.
@@ -862,7 +862,8 @@ script.api.parseVoice = parseVoice;
 // imagine(prompt) spawns a normal node (a pulsing placeholder orb with an "Imagining '<prompt>'..." caption). The injected
 // generator (setGenerator) later delivers a glTF asset; the orb's visuals are then swapped for the model while the node
 // keeps all behaviour (drag, link, rules, physics). On failure, or after the timeout, the orb simply stays.
-var IMAGINE_SIZE = 12;                                   // node footprint in cm (between M and L)
+var IMAGINE_SIZE = 18;                                   // node footprint in cm: 1.5x the old 12 (radius 9 still fits the stage box; collisions use the same radius)
+var GROW_START = 0.65, GROW_TAU = 20;                    // the pending orb starts at 65% and slowly grows towards full size (time constant in s)
 var IMAGINE_COLOR = new vec4(0.7, 0.55, 1.0, 1);
 var IMAGINE_TIMEOUT = 120;                               // seconds
 var FAIL_CAPTION_SECS = 4;
@@ -926,6 +927,7 @@ function swapInModel(job, gltf) {
     var model = gltf.tryInstantiate(holder, imagineMaterial());
     if (!model) { holder.destroy(); throw new Error("tryInstantiate returned null"); }
     setLayerRec(holder, n.obj.layer);
+    n.baseScale = vec3.one().uniformScale(n.size); n.radius = n.size * 0.5;   // the placeholder was still growing: the model gets the full hero size
     n.tr.setLocalScale(n.baseScale);                       // measure at the node's resting scale
     var b = worldBounds(holder);
     if (!b || b.radius < 1e-5) { holder.destroy(); throw new Error("model has no geometry"); }
@@ -952,7 +954,7 @@ function imagine(prompt) {
     var n = spawnNode({ shape: "sphere", color: IMAGINE_COLOR, glow: true, size: IMAGINE_SIZE, name: "Imagined: " + prompt });
     if (!n) { return -1; }
     var cap = makeText("Imagine Caption", 60, new vec3(n.pos.x, n.pos.y + n.radius + 4, WORLD_Z), new vec4(0.85, 0.95, 1, 1));
-    cap.text.text = "Imagining '" + prompt + "'…"; cap.text.renderOrder = 100;
+    cap.text.text = "Imagining '" + prompt + "'… 0s"; cap.text.renderOrder = 100;
     var job = { n: n, prompt: prompt, t0: elapsed, state: "pending", result: null, cap: cap, capUntil: 0, cancel: null, reason: "", timeout: imagineTimeout };
     imagineJobs.push(job);
     n.job = job;
@@ -983,12 +985,16 @@ function updateImagine(dt) {
                 failJob(job, "timeout after " + job.timeout + "s");
             }
         }
-        if (job.state === "pending") {   // pulsing placeholder (skipped while selected / collision-pulsing, which own the scale)
-            var k = 0.5 + 0.5 * Math.sin((elapsed - job.t0) * 5);
+        if (job.state === "pending") {   // alive placeholder: slow growth, gentle pulse, seconds counter (growth/pulse yield to selection and collision pulses)
+            var age = elapsed - job.t0, g = 1 - (1 - GROW_START) * Math.exp(-age / GROW_TAU);
+            n.baseScale = vec3.one().uniformScale(n.size * g); n.radius = n.size * 0.5 * g;
+            var k = 0.5 + 0.5 * Math.sin(age * 4);
             if (n.pulse < 0 && n !== selNode && !n.selShown) {
-                n.tr.setLocalScale(n.baseScale.uniformScale(0.92 + 0.16 * k));
+                n.tr.setLocalScale(n.baseScale.uniformScale(0.96 + 0.08 * k));
                 setNodeColor(n, lerp4(n.color, new vec4(1, 1, 1, 1), 0.45 * k));
             }
+            var secs = Math.floor(age);
+            if (job.cap && secs !== job.lastSecs) { job.lastSecs = secs; job.cap.text.text = "Imagining '" + job.prompt + "'… " + secs + "s"; }
         }
         if (job.cap) {
             job.cap.tr.setWorldPosition(new vec3(n.pos.x, Math.min(n.pos.y + n.radius + 4, 22), WORLD_Z));

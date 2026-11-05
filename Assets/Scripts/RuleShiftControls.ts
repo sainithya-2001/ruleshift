@@ -17,7 +17,7 @@ const SIZE_KEYS = ["S", "M", "L"]
 const WEIGHT_KEYS = ["light", "heavy"]
 const BOUNCE_KEYS = ["low", "high"]
 
-const SURPRISE_PROMPTS = ["a glowing jellyfish", "a tiny planet with rings", "a crystal tree", "a sleepy cloud", "a neon koi fish"]
+const SURPRISE_PROMPTS = ["a floating paper lantern", "a tiny planet with rings", "a crystal tree", "a sleepy cloud", "a neon koi fish"]
 
 const Z = -95 // the world's depth plane
 const ASR_INITIAL_WINDOW = 10 // seconds to start speaking

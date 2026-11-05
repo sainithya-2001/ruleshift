@@ -1,7 +1,7 @@
 // @input Component.ScriptComponent controller
 // @input bool runTests = false
 // @input bool liveImagine = false
-// @input string liveImaginePrompt = "a glowing jellyfish"
+// @input string liveImaginePrompt = "a floating paper lantern"
 
 // Self-driving test harness for RULESHIFT. Set runTests=true, run Preview, read the RULESHIFT TEST lines.
 if (script.runTests) {
@@ -310,11 +310,16 @@ if (script.runTests) {
         var ja = nodes[ia].job, sa = nodes[ia].tr.getLocalScale().x; yield 0.12; var sb = nodes[ia].tr.getLocalScale().x; yield 0.12; var sc2 = nodes[ia].tr.getLocalScale().x;
         check("14 Imagine spawns a placeholder orb node while pending", ia === 0 && api.count() === 1 && ja.state === "pending" && stub.calls[0] === "a glowing jellyfish");
         check("14 Placeholder orb pulses", Math.abs(sa - sb) > 0.01 || Math.abs(sb - sc2) > 0.01, sa.toFixed(2) + "," + sb.toFixed(2) + "," + sc2.toFixed(2));
-        check("14 Caption reads Imagining '<prompt>'…", ja.cap && ja.cap.text.text === "Imagining 'a glowing jellyfish'…", ja.cap ? ja.cap.text.text : "no caption");
+        check("14 Caption reads Imagining '<prompt>'… with a seconds counter", ja.cap && /^Imagining 'a glowing jellyfish'… \d+s$/.test(ja.cap.text.text), ja.cap ? ja.cap.text.text : "no caption");
+        var capA = ja.cap.text.text, rA = nodes[ia].radius; yield 1.4;
+        var capB = ja.cap.text.text, rB = nodes[ia].radius, secA = parseInt(capA.split("… ")[1]), secB = parseInt(capB.split("… ")[1]);
+        check("14 Counter advances while waiting", secB > secA, capA.split("… ")[1] + " -> " + capB.split("… ")[1]);
+        check("14 Placeholder orb slowly grows (radius and collision radius follow)", rB > rA + 0.05 && rB < nodes[ia].size * 0.5, rA.toFixed(2) + " -> " + rB.toFixed(2) + " of " + (nodes[ia].size * 0.5));
+        check("14 Imagined objects are 1.5x the old size (18 cm footprint)", nodes[ia].size === 18);
         check("14 Orb is interactable like any node", T.pendingBinds() === 0 || nodes[ia].obj.getComponents("Component.ScriptComponent").length > 0);
 
         // 14b success: swap the model in as a normal node
-        var nb = api.spawn({ shape: "cube", sizeKey: "M", color: [0, 0.85, 1] }); yield 0.15;
+        var nb = api.spawn({ shape: "cube", sizeKey: "S", color: [0, 0.85, 1] }); yield 0.15;
         stub.cbs[0].onSuccess(fakeAsset()); yield 0.3;
         var na = nodes[ia], mr = na.modelRoot;
         check("14 Success: state ok and the model replaced the orb", ja.state === "ok" && na.imagined === true && mr && na.rmv.enabled === false, ja.state);
@@ -322,13 +327,13 @@ if (script.runTests) {
         check("14 Success: caption removed", ja.cap === null);
         var cA = na.obj.getComponent("Component.ColliderComponent");
         check("14 Success: collider sized from the model bounds", cA && cA.shape && cA.shape.radius >= 0.3 && cA.shape.radius <= 0.75, cA && cA.shape ? "r " + cA.shape.radius.toFixed(3) : "no collider");
-        check("14 Success: node radius still fits the stage footprint (size/2)", Math.abs(na.radius - na.size * 0.5) < 0.001 && na.size <= 14);
+        check("14 Success: node radius still fits the stage footprint (size/2)", Math.abs(na.radius - na.size * 0.5) < 0.001 && na.size === 18 && Math.abs(ja.bounds.after - na.radius) < 0.15, "bounds " + ja.bounds.after.toFixed(2) + " radius " + na.radius.toFixed(2));
         check("14 Success: model is centred on the node", mr && mr.getTransform().getWorldPosition().distance(na.tr.getWorldPosition()) < na.size, "");
         // behaves as a normal node: draggable, linkable, all rules
-        T.pressStart(ia); na.tr.setLocalPosition(new vec3(-6, -4, z)); yield 0.15;
+        T.place(nb, new vec3(13, -4, z)); yield 0.1; T.pressStart(ia); na.tr.setLocalPosition(new vec3(-6, -4, z)); yield 0.15;
         check("14 Swapped node is draggable (position follows the hand)", Math.abs(na.pos.x + 6) < 0.3 && Math.abs(na.pos.y + 4) < 0.3, na.pos.x.toFixed(1) + "," + na.pos.y.toFixed(1));
         T.pressEnd(ia, false);
-        T.place(ia, new vec3(-10, -4, z)); T.place(nb, new vec3(11, -4, z)); yield 0.1;   // 21 cm apart: beyond the ATTRACT rest distance (6 + 5 + 6 = 17)
+        T.place(ia, new vec3(-8, -4, z)); T.place(nb, new vec3(13, -4, z)); yield 0.1;   // 21 cm apart: beyond the ATTRACT rest distance (9 + 3.5 + 6 = 18.5)
         var lk = T.connect(ia, nb, "ATTRACT");
         check("14 Swapped node can be linked", lk && lk.active === true);
         api.activate(); yield 0.1;
@@ -336,6 +341,7 @@ if (script.runTests) {
         check("14 Rule ATTRACT works on the swapped node", d1 < d0 - 0.2, d0.toFixed(1) + "->" + d1.toFixed(1));
         T.setRule(lk, "REPEL", "test"); var d2 = na.pos.distance(nodes[nb].pos); yield 0.8; var d3 = na.pos.distance(nodes[nb].pos);
         check("14 Rule REPEL works on the swapped node", d3 > d2 + 0.2, d2.toFixed(1) + "->" + d3.toFixed(1));
+        check("14 Hero-size node stays inside the stage box, above the buttons, without overlapping its neighbour", Math.abs(na.pos.x) <= Math.min(T.box.x, api.view().stageR - na.radius) + 0.05 && na.pos.y <= T.box.yMax + 0.05 && na.pos.y - na.radius >= T.box.buttonTop - 0.05 && na.pos.distance(nodes[nb].pos) >= na.radius + nodes[nb].radius - 0.1, "pos " + na.pos.x.toFixed(1) + "," + na.pos.y.toFixed(1) + " r " + na.radius.toFixed(1));
         T.setRule(lk, "COLLISION_TRIGGER", "test");
         check("14 Rule COLLISION_TRIGGER set on the swapped node", lk.rule === "COLLISION_TRIGGER");
         stub.cbs[0].onFail("late failure after success"); yield 0.2;
@@ -400,7 +406,7 @@ if (script.runTests) {
             check("14 Empty voice transcript does not call Snap3D", stub.calls.length === 1);
             api.clearAll(); yield 0.1; stub.calls.length = 0; stub.cbs.length = 0;
             for (var si = 0; si < 6; si++) { ctl.surpriseMe(); yield 0.05; }
-            var EXP = ["a glowing jellyfish", "a tiny planet with rings", "a crystal tree", "a sleepy cloud", "a neon koi fish", "a glowing jellyfish"];
+            var EXP = ["a floating paper lantern", "a tiny planet with rings", "a crystal tree", "a sleepy cloud", "a neon koi fish", "a floating paper lantern"];
             check("14 Surprise me cycles the 5 prompts in order and wraps", JSON.stringify(stub.calls) === JSON.stringify(EXP), JSON.stringify(stub.calls));
             api.clearAll(); yield 0.2;
         }

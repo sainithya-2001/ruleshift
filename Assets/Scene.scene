@@ -2657,7 +2657,6 @@
   ScriptInputsDefault:
     runTests: true
     liveImagine: true
-    liveImaginePrompt: true
   ScriptTypesDefault:
     {}
   ScriptInputs:
@@ -2665,7 +2664,7 @@
       controller: !<reference.ScriptComponent> 4aef1a10-019c-4696-a7b1-b4bd90edb0eb
       runTests: false
       liveImagine: false
-      liveImaginePrompt: a glowing jellyfish
+      liveImaginePrompt: a floating paper lantern
   ScriptTypes:
     "":
       {}
