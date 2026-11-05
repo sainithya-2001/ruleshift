@@ -16,6 +16,8 @@
     - !<own> b512a96f-3452-49fe-8385-a48e85922abd
     - !<own> 0121d394-ca33-413a-acbe-28252d3164bb
     - !<own> c96a945f-56f6-4ef0-ab0e-f6f942238392
+    - !<own> 68608a41-7555-4180-aa24-6a41585e6bbc
+    - !<own> 4a04b12b-7ef7-43f7-988b-6c806706db55
   layers: !<Layers/267ee9a7-aff2-4f9d-9a49-f71214747d03>
     userLayers:
       - id: 1
@@ -1089,6 +1091,41 @@
     - !<own> 8fe2a532-9bf3-4cde-b598-04ce5470718d
   Components:
     []
+- !<RenderMeshVisual/47bd088b-aaa8-4d85-a0c2-f531befedaba>
+  PrefabRemaps:
+    []
+  Name: Render Mesh Visual
+  Enabled: true
+  RenderOrder: 0
+  StretchMode: Stretch
+  VerticalAlignment: Center
+  HorizontalAlignment: Center
+  MeshShadowMode: None
+  ShadowColor: {x: 1.000000, y: 1.000000, z: 1.000000, w: 1.000000}
+  ShadowDensity: 1.000000
+  Materials:
+    - !<reference> 5b35b25e-5058-40fc-be1a-06e4967d58cd
+  Mesh: !<reference> cfdb0b16-cdd2-4aa2-bee9-fa80a6f75e5a
+  Skin: !<reference> 00000000-0000-0000-0000-000000000000
+  BlendShapesEnabled: true
+  BlendNormals: false
+  BlendShapes:
+    {}
+- !<SceneObject/4a04b12b-7ef7-43f7-988b-6c806706db55>
+  PrefabRemaps:
+    []
+  Name: RULESHIFT Connection BC
+  Enabled: true
+  Layers: 1
+  LocalTransform: !<TransformEntity>
+    Position: {x: 6.000000, y: 8.000000, z: -80.000000}
+    Rotation: {x: 0.000000, y: 0.000000, z: 90.000000}
+    Scale: {x: 10.000000, y: 8.333000, z: 10.000000}
+    HasSegmentScaleCompensation: false
+  Children:
+    []
+  Components:
+    - !<own> 85b09e33-ecff-4449-b5bf-1f776f910a80
 - !<ScriptComponent/4aef1a10-019c-4696-a7b1-b4bd90edb0eb>
   PrefabRemaps:
     []
@@ -1096,8 +1133,6 @@
   Enabled: true
   ScriptAsset: !<reference> c267126f-a7b1-416b-9dc7-5cdeeb3a03e3
   ScriptInputsDefault:
-    nodeC: true
-    connBC: true
     strength: true
   ScriptTypesDefault:
     {}
@@ -1105,9 +1140,9 @@
     "":
       nodeA: !<reference.SceneObject> 08b9edd8-4a03-43f3-9bb4-fafbc26a56bf
       nodeB: !<reference.SceneObject> b512a96f-3452-49fe-8385-a48e85922abd
-      nodeC: !<reference.SceneObject> 00000000-0000-0000-0000-000000000000
+      nodeC: !<reference.SceneObject> 68608a41-7555-4180-aa24-6a41585e6bbc
       connAB: !<reference.SceneObject> 74ee3531-c066-4408-8fe9-5257b060f267
-      connBC: !<reference.SceneObject> 00000000-0000-0000-0000-000000000000
+      connBC: !<reference.SceneObject> 4a04b12b-7ef7-43f7-988b-6c806706db55
       interactable: !<reference.ScriptComponent> 2b19e007-598c-4a1e-8550-7e2d3d8459dc
       strength: 0.800000
       debugAutoToggle: false
@@ -1444,6 +1479,21 @@
     - !<own> 80574bd1-697b-4bb5-b9ce-13b340146d82
   Components:
     - !<own> ccf4d3bc-d3c2-4580-b9c5-62f164ef7eef
+- !<SceneObject/68608a41-7555-4180-aa24-6a41585e6bbc>
+  PrefabRemaps:
+    []
+  Name: RULESHIFT Sphere C
+  Enabled: true
+  Layers: 1
+  LocalTransform: !<TransformEntity>
+    Position: {x: 0.000000, y: 16.000000, z: -80.000000}
+    Rotation: {x: 0.000000, y: 0.000000, z: 0.000000}
+    Scale: {x: 10.000000, y: 10.000000, z: 10.000000}
+    HasSegmentScaleCompensation: false
+  Children:
+    []
+  Components:
+    - !<own> 47bd088b-aaa8-4d85-a0c2-f531befedaba
 - !<SceneObject/6a7a67db-5675-49bb-8f31-ba0588e3cffc>
   PrefabRemaps:
     []
@@ -1878,6 +1928,26 @@
     - !<own> 6c1f70d7-86d0-4972-b203-29780f8798e6
   Components:
     []
+- !<RenderMeshVisual/85b09e33-ecff-4449-b5bf-1f776f910a80>
+  PrefabRemaps:
+    []
+  Name: Render Mesh Visual
+  Enabled: true
+  RenderOrder: 0
+  StretchMode: Stretch
+  VerticalAlignment: Center
+  HorizontalAlignment: Center
+  MeshShadowMode: None
+  ShadowColor: {x: 1.000000, y: 1.000000, z: 1.000000, w: 1.000000}
+  ShadowDensity: 1.000000
+  Materials:
+    - !<reference> e0831fa0-436b-4a44-9035-44dd570a6815
+  Mesh: !<reference> 31500723-2790-405b-b35b-8af8c17c9130
+  Skin: !<reference> 00000000-0000-0000-0000-000000000000
+  BlendShapesEnabled: true
+  BlendNormals: false
+  BlendShapes:
+    {}
 - !<SceneObject/879ce45b-bd5e-40ff-a3fe-d821523427e4>
   PrefabRemaps:
     []
