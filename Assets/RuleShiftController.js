@@ -92,7 +92,9 @@ function addConnection(a, b, rule, visual) {
     connections.push(c);
     var lo = global.scene.createSceneObject("Rule Label " + connections.length);
     c.label = lo.createComponent("Component.Text");
-    c.label.size = 110; c.label.depthTest = false;
+    c.label.size = 110; c.label.depthTest = false; c.label.renderOrder = 100;
+    c.label.outlineSettings.enabled = true; c.label.outlineSettings.size = 0.6;
+    c.label.outlineSettings.fill.color = new vec4(0.08, 0.04, 0.25, 1);
     c.label.horizontalAlignment = HorizontalAlignment.Center;
     c.label.verticalAlignment = VerticalAlignment.Center;
     c.labelTr = lo.getTransform();
@@ -177,11 +179,7 @@ function integrate(dt) {
         var sp = n.vel.length;
         if (sp > MAX_SPEED) { n.vel = n.vel.uniformScale(MAX_SPEED / sp); }
         var p = n.pos.add(n.vel.uniformScale(dt));
-        var cx = n.initial.x, cy = n.initial.y, cz = n.initial.z;
-        p.x = Math.max(-BOUND, Math.min(BOUND, p.x));
-        p.y = Math.max(cy - 25, Math.min(Math.min(cy + 25, WORLD_CEIL), p.y));
-        p.z = Math.max(cz - 25, Math.min(cz + 25, p.z));
-        n.pos = p;
+        n.pos = clampToBox(n, p);
         n.tr.setLocalPosition(p);
     });
 }
@@ -189,8 +187,8 @@ function integrate(dt) {
 function syncDragged() {   // a grabbed sphere owns its position; physics resumes from wherever it is released
     nodes.forEach(function (n) {
         if (!n.dragging) { return; }
-        var p = n.tr.getLocalPosition();
-        n.pos = new vec3(p.x, p.y, p.z); n.vel = vec3.zero(); n.force = vec3.zero();
+        n.pos = clampToBox(n, n.tr.getLocalPosition()); n.vel = vec3.zero(); n.force = vec3.zero();
+        n.tr.setLocalPosition(n.pos);
     });
 }
 
@@ -254,7 +252,12 @@ function updateGoal(dt) {
         if (settleTime > 1.5) { goalStage = 3; startGoalPulse(); goalText.text = "Triangle! Rule rewritten! \u2728"; print("RULESHIFT goal 2 complete"); }
     }
 }
-var WORLD_CEIL = 10;   // keeps spheres and labels below the challenge panel
+var BOX_X = 19, BOX_YMIN = -12, BOX_YMAX = 10, BOX_Z = 10;   // keeps spheres above the buttons and inside the view
+function clampToBox(n, p) {
+    return new vec3(Math.max(-BOX_X, Math.min(BOX_X, p.x)),
+        Math.max(BOX_YMIN, Math.min(BOX_YMAX, p.y)),
+        Math.max(n.initial.z - BOX_Z, Math.min(n.initial.z + BOX_Z, p.z)));
+}   // keeps spheres and labels below the challenge panel
 // Soft collision: any overlapping pair is pushed apart to exactly touching. A grabbed sphere is never pushed.
 function resolveOverlaps() {
     for (var i = 0; i < nodes.length; i++) {
@@ -274,7 +277,7 @@ function resolveOverlaps() {
 var UP = new vec3(0, 1, 0);
 var POP_TIME = 0.4, lastDt = 0.016;
 var LABEL_TEXT = { ATTRACT: "ATTRACT", REPEL: "REPEL", COLLISION_TRIGGER: "ON COLLISION" };
-var labelAlpha = 1;
+var labelAlpha = 1;   // labels stay fully opaque in every mode
 function updateLabel(c) {
     var A = nodes[c.a].pos, B = nodes[c.b].pos;
     var mid = A.add(B).uniformScale(0.5);
@@ -352,7 +355,6 @@ script.createEvent("UpdateEvent").bind(function (e) {
     if (state === "live") { checkCollisions(); }
     updatePulses(dt);
     updateGoal(dt);
-    labelAlpha += ((state === "live" ? 0.2 : 1) - labelAlpha) * Math.min(1, dt * 6);
     connections.forEach(updateLabel);
     connections.forEach(updateVisual);
 });
@@ -397,3 +399,4 @@ try {
     pt.setWorldScale(new vec3(bh / mc.mW, bw / mc.mL, bd / mc.mD));
     pt.setWorldPosition(new vec3(0, CTRL_Y, WORLD_Z - 1));
 } catch (err) { print("RULESHIFT backing failed: " + err); }
+
