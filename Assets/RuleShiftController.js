@@ -21,12 +21,18 @@ var RULE_COLOR = {
 var nodes = [];      // {obj, tr, pos:vec3, vel:vec3, force:vec3, initial:vec3}
 var connections = []; // {a, b, rule, visual, baseScaleY, baseDist}
 
+function meshRadius(obj) {
+    var r = obj.getComponent("Component.RenderMeshVisual");
+    var s = obj.getTransform().getWorldScale();
+    if (r && r.mesh) { return (r.mesh.aabbMax.x - r.mesh.aabbMin.x) / 2 * s.x; }
+    return s.x / 2;
+}
 function addNode(obj) {
     if (!obj) { return -1; }
     var tr = obj.getTransform();
     var p = tr.getLocalPosition();
     nodes.push({ obj: obj, tr: tr, pos: new vec3(p.x, p.y, p.z), vel: vec3.zero(),
-        force: vec3.zero(), initial: new vec3(p.x, p.y, p.z) });
+        force: vec3.zero(), initial: new vec3(p.x, p.y, p.z), radius: meshRadius(obj) });
     return nodes.length - 1;
 }
 function applyColor(c) {
@@ -60,7 +66,8 @@ function setRule(c, rule, why) {
     print("RULESHIFT " + nodes[c.a].obj.name + "-" + nodes[c.b].obj.name + " rule -> " + rule + " (" + why + ")");
 }
 
-var REST_ATTRACT = 6, REPEL_RANGE = 40, BOUND = 45, DAMPING = 3.0, MAX_SPEED = 40;
+var LINK_GAP = 6;  // visible link length when attracted
+var REST_ATTRACT_UNUSED = 6, REPEL_RANGE = 40, BOUND = 45, DAMPING = 3.0, MAX_SPEED = 40;
 function computeForces() {
     nodes.forEach(function (n) { n.force = vec3.zero(); });
     connections.forEach(function (c) {
@@ -70,7 +77,8 @@ function computeForces() {
         var dir = delta.uniformScale(1 / dist);   // A -> B
         var f = 0;
         if (c.rule === RULES.ATTRACT) {
-            f = dist > REST_ATTRACT ? script.strength * 30 * Math.min(1, (dist - REST_ATTRACT) / 10) : 0;
+            var rest = A.radius + B.radius + LINK_GAP;
+            f = dist > rest ? script.strength * 30 * Math.min(1, (dist - rest) / 10) : 0;
         } else if (c.rule === RULES.REPEL) {
             f = dist < REPEL_RANGE ? -script.strength * 60 * (1 - dist / REPEL_RANGE) - 6 : 0;
         }
@@ -140,4 +148,5 @@ script.createEvent("OnStartEvent").bind(function () {
         }
     });
 });
+print("RULESHIFT radii: " + nodes.map(function (n) { return n.radius.toFixed(1); }).join(","));
 print("RULESHIFT system: " + nodes.length + " nodes, " + connections.length + " connections");
