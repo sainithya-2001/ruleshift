@@ -19,6 +19,7 @@ var RULE_COLOR = {
     COLLISION_TRIGGER: new vec4(0.8, 0.3, 1.0, 1) // violet
 };
 
+var NODE_COLORS = [new vec4(1.0, 0.25, 0.6, 1), new vec4(0.2, 1.0, 0.8, 1), new vec4(1.0, 0.9, 0.2, 1)]; // pink, mint, sun
 var nodes = [];      // {obj, tr, pos:vec3, vel:vec3, force:vec3, initial:vec3}
 var connections = []; // {a, b, rule, visual, baseScaleY, baseDist}
 
@@ -28,18 +29,28 @@ function meshRadius(obj) {
     if (r && r.mesh) { return (r.mesh.aabbMax.x - r.mesh.aabbMin.x) / 2 * s.x; }
     return s.x / 2;
 }
+var USE_EMISSIVE = true;
+function setNodeColor(rmv, col) {   // PBR sphere mat has no colour param; Port_Emissive_N006 is the tintable one
+    if (USE_EMISSIVE) { rmv.mainPass.Port_Emissive_N006 = new vec3(col.r, col.g, col.b); }
+    else { rmv.mainPass.baseColor = col; }
+}
 function addNode(obj) {
     if (!obj) { return -1; }
+    var nrmv = obj.getComponent("Component.RenderMeshVisual");
+    var col = NODE_COLORS[nodes.length % NODE_COLORS.length];
+    if (nrmv) { nrmv.mainMaterial = nrmv.mainMaterial.clone(); setNodeColor(nrmv, col); }
     var tr = obj.getTransform();
     var p = tr.getLocalPosition();
     nodes.push({ obj: obj, tr: tr, pos: new vec3(p.x, p.y, p.z), vel: vec3.zero(),
         force: vec3.zero(), initial: new vec3(p.x, p.y, p.z), radius: meshRadius(obj),
-        baseScale: obj.getTransform().getLocalScale(), pulse: -1 });
+        baseScale: obj.getTransform().getLocalScale(), pulse: -1, color: col, rmv: nrmv });
     return nodes.length - 1;
 }
+var LINK_THICKNESS = 1.3, HALO_SCALE = 1.7;
 function applyColor(c) {
     if (c.rmv && c.rmv.mainPass) {
         c.rmv.mainPass.baseColor = RULE_COLOR[c.rule];
+        if (c.haloRmv) { var k = RULE_COLOR[c.rule]; c.haloRmv.mainPass.baseColor = new vec4(k.r * 0.35, k.g * 0.35, k.b * 0.35, 0.35); }
     } else { print("RULESHIFT no mainPass for " + c.visual.name); }
 }
 function addConnection(a, b, rule, visual) {
@@ -48,6 +59,8 @@ function addConnection(a, b, rule, visual) {
     var c = { a: a, b: b, rule: rule, visual: visual, rmv: visual.getComponent("Component.RenderMeshVisual"),
         cooldownUntil: 0, baseScaleY: visual.getTransform().getLocalScale().y, baseDist: d };
     if (c.rmv) { c.rmv.mainMaterial = c.rmv.mainMaterial.clone(); }
+    var vs = visual.getTransform().getLocalScale();
+    c.thick = LINK_THICKNESS; c.pop = -1; c.baseScaleX = vs.x; c.baseScaleZ = vs.z;
     connections.push(c);
     applyColor(c);
     return c;
@@ -64,6 +77,7 @@ function cycleRule(c, why) {
 }
 function setRule(c, rule, why) {
     c.rule = rule;
+    c.pop = 0;
     applyColor(c);
     print("RULESHIFT " + nodes[c.a].obj.name + "-" + nodes[c.b].obj.name + " rule -> " + rule + " (" + why + ")");
 }
@@ -90,7 +104,7 @@ function computeForces() {
     });
 }
 
-var TOUCH_COOLDOWN = 1.0, PULSE_TIME = 0.35, PULSE_AMOUNT = 0.4;
+var TOUCH_COOLDOWN = 1.0, PULSE_TIME = 0.5, PULSE_AMOUNT = 0.9;
 function flip(rule) { return rule === RULES.ATTRACT ? RULES.REPEL : (rule === RULES.REPEL ? RULES.ATTRACT : rule); }
 function checkCollisions() {
     connections.forEach(function (c) {
@@ -108,6 +122,7 @@ function checkCollisions() {
         });
     });
 }
+function lerp4(a, b, t) { return new vec4(a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t, 1); }
 function updatePulses(dt) {
     nodes.forEach(function (n) {
         if (n.pulse < 0) { return; }
@@ -115,6 +130,7 @@ function updatePulses(dt) {
         var k = n.pulse >= PULSE_TIME ? 0 : Math.sin(Math.PI * n.pulse / PULSE_TIME);
         if (n.pulse >= PULSE_TIME) { n.pulse = -1; }
         n.tr.setLocalScale(n.baseScale.uniformScale(1 + PULSE_AMOUNT * k));
+        if (n.rmv) { setNodeColor(n.rmv, lerp4(n.color, new vec4(1, 1, 1, 1), k)); }
     });
 }
 
@@ -135,6 +151,7 @@ function integrate(dt) {
 }
 
 var UP = new vec3(0, 1, 0);
+var POP_TIME = 0.4, lastDt = 0.016;
 function updateVisual(c) {
     var A = nodes[c.a].pos, B = nodes[c.b].pos;
     var delta = B.sub(A);
@@ -143,7 +160,10 @@ function updateVisual(c) {
     tr.setLocalPosition(A.add(B).uniformScale(0.5));
     tr.setLocalRotation(quat.rotationFromTo(UP, delta.uniformScale(1 / dist)));
     var s = tr.getLocalScale();
-    tr.setLocalScale(new vec3(s.x, c.baseScaleY * dist / c.baseDist, s.z));
+    var pk = 0;
+    if (c.pop >= 0) { c.pop += lastDt; pk = c.pop >= POP_TIME ? 0 : Math.sin(Math.PI * c.pop / POP_TIME); if (c.pop >= POP_TIME) { c.pop = -1; } }
+    var w = c.thick * (1 + 1.2 * pk);
+    tr.setLocalScale(new vec3(c.baseScaleX * w, c.baseScaleY * dist / c.baseDist, c.baseScaleZ * w));
 }
 
 // Modes: creation (stationary, start) -> live <-> paused. Reset -> creation.
@@ -176,6 +196,7 @@ script.api.reset = resetWorld;
 var elapsed = 0, lastToggle = 0, lastLog = -1;
 script.createEvent("UpdateEvent").bind(function (e) {
     var dt = Math.min(e.getDeltaTime(), 0.05);
+    lastDt = dt;
     elapsed += e.getDeltaTime();
     if (state === "live" && script.debugAutoToggle && elapsed - lastToggle >= 3 && connections.length) {
         lastToggle = elapsed;
@@ -209,5 +230,19 @@ script.createEvent("OnStartEvent").bind(function () {
         }
     });
 });
+// Opaque violet backing so the button labels read on any background (a copy of the link box).
+try {
+    var plate = script.connAB.copyWholeHierarchy(script.connAB);
+    var pc = plate.getComponent("Component.ColliderComponent"); if (pc) { pc.destroy(); }
+    plate.name = "Controls Backing"; plate.setParent(null);
+    plate.getTransform().setWorldPosition(new vec3(0, -22, -80.6));
+    plate.getTransform().setWorldRotation(quat.quatIdentity());
+    plate.getTransform().setWorldScale(new vec3(40, 4.8, 0.4)); plate.getTransform().setWorldPosition(new vec3(0, -22, -80.6));
+    var prmv = plate.getComponent("Component.RenderMeshVisual");
+    prmv.mainMaterial = prmv.mainMaterial.clone();
+    prmv.mainPass.baseColor = new vec4(0.3, 0.12, 0.6, 1);
+    plate.enabled = true;
+    print("RULESHIFT backing created");
+} catch (err) { print("RULESHIFT backing failed: " + err); }
 print("RULESHIFT radii: " + nodes.map(function (n) { return n.radius.toFixed(1); }).join(","));
 print("RULESHIFT system: " + nodes.length + " nodes, " + connections.length + " connections");

@@ -48,5 +48,5 @@
       {}
   InputLines:
     - '// @input Component.ScriptComponent controller {"hint":"RuleShiftController script (JS) exposing script.api"}'
-    - '// @input vec2 buttonSize = {13,5} {"hint":"Button width/height in cm"}'
+    - '// @input vec2 buttonSize = {16,6} {"hint":"Button width/height in cm"}'
     - '// @input float gap = 2 {"hint":"Horizontal gap between buttons in cm"}'
