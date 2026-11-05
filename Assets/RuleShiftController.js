@@ -47,6 +47,20 @@ function addNode(obj) {
         baseScale: obj.getTransform().getLocalScale(), pulse: -1, dragging: false, color: col, rmv: nrmv });
     return nodes.length - 1;
 }
+// Depth cue: a soft white specular blob upper-left-front + a darker tinted blob lower-right, both children of the sphere.
+function addShading(n) {
+    if (!n.rmv || !n.rmv.mesh) { return; }
+    var r = (n.rmv.mesh.aabbMax.x - n.rmv.mesh.aabbMin.x) / 2;
+    function blob(name, off, sc, col) {
+        var o = global.scene.createSceneObject(name);
+        o.setParent(n.obj); o.layer = n.obj.layer;
+        var v = o.createComponent("Component.RenderMeshVisual");
+        v.mesh = n.rmv.mesh; v.mainMaterial = SPHERE_MAT.clone(); v.mainPass.baseColor = col;
+        o.getTransform().setLocalScale(vec3.one().uniformScale(sc));
+        o.getTransform().setLocalPosition(off.uniformScale(r));
+    }
+    blob("Shine", new vec3(-0.38, 0.42, 0.62), 0.3, lerp4(n.color, new vec4(1, 1, 1, 1), 0.7));
+}
 var HALO_SCALE = 1.7;
 function applyColor(c) {
     if (c.rmv && c.rmv.mainPass) {
@@ -89,6 +103,7 @@ function addConnection(a, b, rule, visual) {
 var iA = addNode(script.nodeA);
 var iB = addNode(script.nodeB);
 var iC = addNode(script.nodeC);
+nodes.forEach(addShading);
 addConnection(iA, iB, RULES.ATTRACT, script.connAB);
 addConnection(iB, iC, RULES.REPEL, script.connBC);
 
