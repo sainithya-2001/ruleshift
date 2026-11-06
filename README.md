@@ -32,7 +32,7 @@ On the **RULESHIFT Controller** scene object:
 
 - `demoPreset` (off by default): when on, the Lens opens on an empty stage with no hints, ready to record.
 - `demoStage` (only read when `demoPreset` is on): set it to `chain` to open with a gem, an orb and a cube spread across the stage. The gem and orb are linked with **Attract** and the orb and cube with **On Collision**. Press Play: the orb is pulled toward the gem, bumps the cube, a pulse runs down the gem-orb link, and that link flips to **Repel**.
-- `demoStage` = `universe`: opens on four saved Snap3D models (`Assets/RULESHIFT Models/`: island, creature, core, crystal tree), loaded instantly with no token or wait. The creature follows the core (Attract), the core and tree are linked with On Collision, and the creature is also attracted to the island. Press Play: the core meets the tree, a pulse runs down the creature-core link and flips it to **Repel**.
+- `demoStage` = `universe`: opens on four saved Snap3D models (`Assets/RULESHIFT Models/`: library house on a floating island (1.5x, heavy), cat (0.7x, light), paper lantern, glowing flower), loaded instantly with no token or wait. The cat and lantern are linked with Attract, the lantern and flower with On Collision, and the cat and house with Attract. Press Play: the cat pulls the lantern into the flower within a few seconds, and the collision's pulse flips cat-lantern to **Repel**.
 - `lightFx` (off by default, recording only): uses one halo layer instead of three and a one-sphere pulse trail, to save frames in Preview while recording. Set it before running; it is read at startup.
 
 ## Optional: Snap3D token (Surprise me and voice-to-3D)

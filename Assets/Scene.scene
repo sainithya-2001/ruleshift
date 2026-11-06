@@ -1143,10 +1143,10 @@
       demoPreset: false
       demoStage: ""
       lightFx: false
-      islandModel: !<reference.ObjectPrefab> f45f7968-3c3a-4a75-b24d-0e3c7fd71ee0
-      creatureModel: !<reference.ObjectPrefab> f0488228-7df6-4e15-a270-e3fbf702dcbb
-      coreModel: !<reference.ObjectPrefab> 74732071-06f5-4f1a-a4fc-6be3b95ded7c
-      treeModel: !<reference.ObjectPrefab> e1750a68-0d32-44b5-804f-4ec57e349b10
+      homeModel: !<reference.ObjectPrefab> 710506ce-8101-4fa4-8bf0-8f9bddb604c6
+      catModel: !<reference.ObjectPrefab> 90c8f0b0-7e06-455a-935c-31a07477a3fe
+      lanternModel: !<reference.ObjectPrefab> d0bac76c-6508-4463-972d-3db45babe381
+      flowerModel: !<reference.ObjectPrefab> d25b3ddb-3a41-4243-88cf-0133b20e97d6
       camera: !<reference.Camera> 00000000-0000-0065-0000-000000000065
       imagineMaterial: !<reference.Material> 8eebcd57-3582-41fe-9642-3f25700777e8
   ScriptTypes:

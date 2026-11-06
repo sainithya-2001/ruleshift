@@ -5,10 +5,10 @@
 // @input bool demoPreset = false
 // @input string demoStage = ""
 // @input bool lightFx = false
-// @input Asset.ObjectPrefab islandModel
-// @input Asset.ObjectPrefab creatureModel
-// @input Asset.ObjectPrefab coreModel
-// @input Asset.ObjectPrefab treeModel
+// @input Asset.ObjectPrefab homeModel
+// @input Asset.ObjectPrefab catModel
+// @input Asset.ObjectPrefab lanternModel
+// @input Asset.ObjectPrefab flowerModel
 // @input Component.Camera camera
 // @input Asset.Material imagineMaterial
 
@@ -814,20 +814,20 @@ function loadChain() {
     pendingPlace = null;   // everything is already placed: no placement hint
     print("RULESHIFT demo stage: chain");
 }
-// demoStage "universe": island (heavy, 1.5x), creature (light, 0.7x), core and tree at base size 12 cm, from saved models.
-// Links: creature-core ATTRACT (the creature follows the core), core-tree COLLISION TRIGGER (the tree reacts), creature-island ATTRACT.
-// Core and tree meet on Play, the collision flips the links at the core (creature-core becomes REPEL) and the creature drifts to the island.
+// demoStage "universe": library house on a floating island (heavy, 1.5x), cat (light, 0.7x), lantern and flower at base size 12 cm, from saved models.
+// Links: cat-lantern ATTRACT, lantern-flower COLLISION TRIGGER, cat-home ATTRACT. The cat pulls the lantern across the stage into the flower;
+// the collision sends a pulse down the lantern's link and flips cat-lantern to REPEL.
 function loadUniverse() {
     clearAll();
     var base = 12;
-    var island = spawnModelNode(script.islandModel, "Island", base * 1.5, "heavy", new vec3(-0.3, 7.7, WORLD_Z), NODE_COLORS[2]);
-    var creature = spawnModelNode(script.creatureModel, "Creature", base * 0.7, "light", new vec3(15.8, 3.2, WORLD_Z), NODE_COLORS[0]);
-    var core = spawnModelNode(script.coreModel, "Core", base, null, new vec3(-11.4, -11.7, WORLD_Z), NODE_COLORS[1]);
-    var tree = spawnModelNode(script.treeModel, "Tree", base, null, new vec3(6.5, -9.9, WORLD_Z), NODE_COLORS[0]);
-    if (island && creature && core && tree) {
-        activateLink(slotFor(core, tree, true), RULES.COLLISION_TRIGGER, true);   // first, so its label gets the spot nearest its link
-        activateLink(slotFor(creature, core, true), RULES.ATTRACT, true);
-        activateLink(slotFor(creature, island, true), RULES.ATTRACT, true);
+    var home = spawnModelNode(script.homeModel, "Home", base * 1.5, "heavy", new vec3(-2, 7.5, WORLD_Z), NODE_COLORS[2]);
+    var cat = spawnModelNode(script.catModel, "Cat", base * 0.7, "light", new vec3(17, -6, WORLD_Z), NODE_COLORS[0]);
+    var lantern = spawnModelNode(script.lanternModel, "Lantern", base, null, new vec3(-14, -10, WORLD_Z), NODE_COLORS[1]);
+    var flower = spawnModelNode(script.flowerModel, "Flower", base, null, new vec3(4, -10, WORLD_Z), NODE_COLORS[0]);
+    if (home && cat && lantern && flower) {
+        activateLink(slotFor(lantern, flower, true), RULES.COLLISION_TRIGGER, true);   // first, so its label gets the spot nearest its link
+        activateLink(slotFor(cat, lantern, true), RULES.ATTRACT, true);
+        activateLink(slotFor(cat, home, true), RULES.ATTRACT, true);
     }
     pendingPlace = null;
     print("RULESHIFT demo stage: universe");

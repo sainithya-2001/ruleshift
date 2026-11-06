@@ -29,18 +29,18 @@
   PackagePolicy: CanBeUnpacked
   ScriptInputsHidden:
     camera: false
-    coreModel: false
-    creatureModel: false
+    catModel: false
     debugAutoToggle: false
     demoPreset: false
     demoStage: false
+    flowerModel: false
+    homeModel: false
     imagineMaterial: false
-    islandModel: false
+    lanternModel: false
     lightFx: false
     linkTemplate: false
     nodeTemplate: false
     strength: false
-    treeModel: false
   ScriptTypesHidden:
     {}
   ReadMe: !<reference> 00000000-0000-0000-0000-000000000000
@@ -57,10 +57,10 @@
       demoPreset: false
       demoStage: ""
       lightFx: false
-      islandModel: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
-      creatureModel: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
-      coreModel: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
-      treeModel: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
+      homeModel: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
+      catModel: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
+      lanternModel: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
+      flowerModel: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
       camera: !<reference.Camera> 00000000-0000-0000-0000-000000000000
       imagineMaterial: !<reference.Material> 00000000-0000-0000-0000-000000000000
   ScriptTypes:
