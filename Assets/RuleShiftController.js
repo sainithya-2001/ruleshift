@@ -693,7 +693,7 @@ var UP = new vec3(0, 1, 0);
 var POP_TIME = 0.4, lastDt = 0.016;
 var LABEL_TEXT = { ATTRACT: "ATTRACT", REPEL: "REPEL", COLLISION_TRIGGER: "ON COLLISION" };
 var labelAlpha = 1;   // labels stay fully opaque in every mode
-var LABEL_NUDGE_STEP = 0.8, LABEL_NUDGE_MAX = 40;
+var LABEL_NUDGE_STEP = 0.8, LABEL_NUDGE_MAX = 40, LABEL_MAX_X = 15;
 function labelExtent(c) {   // half-size and centre offset of the label text in world cm (the camera sits at the origin, so depth = -z)
     var bb = c.label.getBoundingBox(), sc = c.labelTr.getWorldScale().x;
     var w = (bb.right - bb.left) * sc, h = (bb.top - bb.bottom) * sc;
@@ -725,6 +725,7 @@ function updateLabel(c) {
     var cx = 0; nodes.forEach(function (n) { cx += n.pos.x / nodes.length; });   // side links push their labels outward so labels don't pile up
     var dx = Math.max(-1, Math.min(1, (mid.x - cx) / 6)) * 6.5;
     var lp = mid.add(toCam.uniformScale(22)).add(new vec3(dx, 7, 0));
+    lp = new vec3(Math.max(-LABEL_MAX_X, Math.min(LABEL_MAX_X, lp.x)), lp.y, lp.z);   // keep wide labels inside the visible stage (a label at the far rim was clipped)
     // never sit on top of an object: if the label's screen footprint touches any node, nudge it upward until clear
     var ext = labelExtent(c), nudged = 0;
     if (ext) { while (nudged < LABEL_NUDGE_MAX && labelHitsNode(lp, ext, c)) { lp = lp.add(new vec3(0, LABEL_NUDGE_STEP, 0)); nudged += LABEL_NUDGE_STEP; } }
@@ -816,14 +817,15 @@ function loadChain() {
 }
 // demoStage "universe": library house on a floating island (heavy, 1.5x), cat (light, 0.7x), lantern and flower at base size 12 cm, from saved models.
 // Links: cat-lantern ATTRACT, lantern-flower COLLISION TRIGGER, cat-home ATTRACT. The cat pulls the lantern across the stage into the flower;
-// the collision sends a pulse down the lantern's link and flips cat-lantern to REPEL.
+// the collision sends a pulse down the lantern's link and flips cat-lantern to REPEL. Layout: the cat starts beside the house, the lantern drifts in from the
+// lower right through the flower; the cat is drawn toward the lantern (away from the house), then after the flip retreats to the house and settles.
 function loadUniverse() {
     clearAll();
     var base = 12;
-    var home = spawnModelNode(script.homeModel, "Home", base * 1.5, "heavy", new vec3(-2, 7.5, WORLD_Z), NODE_COLORS[2]);
-    var cat = spawnModelNode(script.catModel, "Cat", base * 0.7, "light", new vec3(17, -6, WORLD_Z), NODE_COLORS[0]);
-    var lantern = spawnModelNode(script.lanternModel, "Lantern", base, null, new vec3(-14, -10, WORLD_Z), NODE_COLORS[1]);
-    var flower = spawnModelNode(script.flowerModel, "Flower", base, null, new vec3(4, -10, WORLD_Z), NODE_COLORS[0]);
+    var home = spawnModelNode(script.homeModel, "Home", base * 1.5, "heavy", new vec3(-13.7, 0.2, WORLD_Z), NODE_COLORS[2]);
+    var cat = spawnModelNode(script.catModel, "Cat", base * 0.7, "light", new vec3(0.4, 0.7, WORLD_Z), NODE_COLORS[0]);
+    var lantern = spawnModelNode(script.lanternModel, "Lantern", base, null, new vec3(17, -14.5, WORLD_Z), NODE_COLORS[1]);
+    var flower = spawnModelNode(script.flowerModel, "Flower", base, null, new vec3(11.8, -1.5, WORLD_Z), NODE_COLORS[0]);
     if (home && cat && lantern && flower) {
         activateLink(slotFor(lantern, flower, true), RULES.COLLISION_TRIGGER, true);   // first, so its label gets the spot nearest its link
         activateLink(slotFor(cat, lantern, true), RULES.ATTRACT, true);

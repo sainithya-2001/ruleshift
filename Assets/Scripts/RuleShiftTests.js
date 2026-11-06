@@ -606,11 +606,23 @@ if (script.runTests) {
         var r2 = lf20.lblRect, fk = { x: tr20.x, y: tr20.y, hw: 0.04, hh: 0.02 };
         check("20 A pill placed on a label pushes the label off it", !(Math.abs(r2.x - fk.x) < r2.hw + fk.hw && Math.abs(r2.y - fk.y) < r2.hh + fk.hh));
         T.setTestPill(null); T.tap(1); yield 0.2;
-        api.activate(); var g20 = 0;
+        var cat20 = nodes[1], hom20 = nodes[0], lan20 = nodes[2];
+        var ch0 = cat20.pos.distance(hom20.pos), cl0 = cat20.pos.distance(lan20.pos), rest20 = cat20.radius + hom20.radius + 6;
+        var maxX20 = 0, outside20 = 0;
+        api.activate(); var g20 = 0, tp20 = 0, chF = ch0, clF = cl0;
         while (g20 < 8 && T.fires(lf20) < 1) { yield 0.25; g20 += 0.25; }
-        check("20 universe: on Play the lantern drifts into the flower and the collision fires within 3-5 s", T.fires(lf20) >= 1 && g20 >= 1 && g20 <= 6, "after " + g20.toFixed(2) + "s");
+        chF = cat20.pos.distance(hom20.pos); clF = cat20.pos.distance(lan20.pos);
+        check("20 story: before the flip the cat moves toward the lantern and away from home", cl0 - clF >= 3 && chF - ch0 >= 1.5, "to lantern " + (cl0 - clF).toFixed(1) + " from home " + (chF - ch0).toFixed(1));
+        check("20 universe: on Play the lantern drifts into the flower and the collision fires within 6 s", T.fires(lf20) >= 1 && g20 <= 6, "after " + g20.toFixed(2) + "s");
         var g20b = 0; while (g20b < 4 && cl20.rule !== "REPEL") { yield 0.2; g20b += 0.2; }
         check("20 universe: the collision's pulse flips cat-lantern to REPEL (chain reaction)", cl20.rule === "REPEL", "rule " + cl20.rule + " cat-home " + ch20.rule);
+        var tEnd20 = g20 + g20b; while (tEnd20 < 5.5) { yield 0.25; tEnd20 += 0.25; }
+        var pA20 = new vec3(cat20.pos.x, cat20.pos.y, cat20.pos.z); yield 0.5;
+        var home20 = cat20.pos.distance(hom20.pos), drift20 = cat20.pos.distance(pA20);
+        check("20 story: after the flip the cat retreats to home and settles there within 6 s of Play", home20 <= rest20 + 1.5 && drift20 < 0.5, "dist " + home20.toFixed(1) + " rest " + rest20.toFixed(1) + " drift " + drift20.toFixed(2) + " t " + (tEnd20 + 0.5).toFixed(2));
+        var lo20b = 0; T.connections.forEach(function (c) { var li = T.labelInfo(c); if (!li.ext || li.hits) { lo20b++; } });
+        var inb20 = nodes.every(function (n) { return Math.abs(n.pos.x) <= 17 + 0.01 && n.pos.y <= 8.01 && n.pos.y - n.radius >= -21; });
+        check("20 story: all objects stay on the stage and no label overlaps a node or label", inb20 && lo20b === 0 && T.labelOverlaps() === 0, "inb " + inb20 + " lbl " + lo20b);
         api.reset(); yield 0.2;
         script.controller.demoStage = ""; api.applyDemoSetup(); yield 0.3;
 
