@@ -33,6 +33,8 @@
     liveImaginePrompt: false
     runTests: false
     showCause: false
+    showEditor: false
+    showGrow: false
     showUniverse: false
   ScriptTypesHidden:
     {}
@@ -48,6 +50,8 @@
       liveImagine: false
       showCause: false
       showUniverse: false
+      showEditor: false
+      showGrow: false
       liveImaginePrompt: a glowing jellyfish
   ScriptTypes:
     -

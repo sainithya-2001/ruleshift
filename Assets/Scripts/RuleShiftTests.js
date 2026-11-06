@@ -3,12 +3,14 @@
 // @input bool liveImagine = false
 // @input bool showCause = false
 // @input bool showUniverse = false
+// @input bool showEditor = false
+// @input bool showGrow = false
 // @input string liveImaginePrompt = "a floating paper lantern"
 
 // Self-driving test harness for RULESHIFT. Set runTests=true, run Preview, read the RULESHIFT TEST lines.
 if (script.runTests) {
     var api, T, nodes, conns, results = [], violations = { overlap: 0, bounds: 0, button: 0 }, monitorOn = false;
-    var gen = null, wait = 0;
+    var gen = null, wait = 0, SIM_STEP = 0.1;   // simulated seconds per frame: about the Preview's ~9 fps, so scenarios behave as designed, but deterministic under any host load
 
     function check(name, ok, info) {
         results.push(ok);
@@ -619,7 +621,7 @@ if (script.runTests) {
         var tEnd20 = g20 + g20b; while (tEnd20 < 5.5) { yield 0.25; tEnd20 += 0.25; }
         var pA20 = new vec3(cat20.pos.x, cat20.pos.y, cat20.pos.z); yield 0.5;
         var home20 = cat20.pos.distance(hom20.pos), drift20 = cat20.pos.distance(pA20);
-        check("20 story: after the flip the cat retreats to home and settles there within 6 s of Play", home20 <= rest20 + 1.5 && drift20 < 1.5, "dist " + home20.toFixed(1) + " rest " + rest20.toFixed(1) + " drift " + drift20.toFixed(2) + " t " + (tEnd20 + 0.5).toFixed(2));
+        check("20 story: after the flip the cat retreats to home and settles there within 6 s of Play", home20 <= rest20 + 1.5 && drift20 < 0.5, "dist " + home20.toFixed(1) + " rest " + rest20.toFixed(1) + " drift " + drift20.toFixed(2) + " t " + (tEnd20 + 0.5).toFixed(2));
         var lo20b = 0; T.connections.forEach(function (c) { var li = T.labelInfo(c); if (!li.ext || li.hits) { lo20b++; } });
         var inb20 = nodes.every(function (n) { return Math.abs(n.pos.x) <= 17 + 0.01 && n.pos.y <= 8.01 && n.pos.y - n.radius >= -21; });
         check("20 story: all objects stay on the stage and no label overlaps a node or label", inb20 && lo20b === 0 && T.labelOverlaps() === 0, "inb " + inb20 + " lbl " + lo20b);
@@ -680,18 +682,94 @@ if (script.runTests) {
         check("21 Reset restores the model's size", Math.abs(m21.radius - mr0) < 0.001 && Math.abs(m21.modelRoot.getTransform().getWorldScale().x / ms0 - 1) < 0.01);
         script.controller.demoStage = ""; api.applyDemoSetup(); yield 0.3;
 
+        // 22 Rule editor: opens next to a link, applies instantly while the simulation runs, closes on selection or a tap elsewhere
+        var RULES5 = ["ATTRACT", "REPEL", "COLLISION_TRIGGER", "TRANSFER", "GROW"];
+        function ang(c) { var m = c.A.pos.add(c.B.pos).uniformScale(0.5), d = Math.max(-m.z, 1); return { x: m.x / d, y: m.y / d }; }
+        api.loadDemo(); yield 0.4;
+        var e0 = conns[0], e1 = conns[1];
+        api.activate(); yield 0.3;
+        T.openEditor(e0); yield 0.6;
+        var pills22 = api.test.editorPills ? api.test.editorPills() : [];
+        check("22 editor opens for the tapped link and is placed", T.editorOpen() === 0 && !!T.editorRect() && api.test.editorShown && api.test.editorShown() === true);
+        check("22 editor lists all 5 rules in order (Attract, Repel, Collision Trigger, Transfer, Grow)", pills22.map(function (q) { return q.rule; }).join() === RULES5.join(), pills22.map(function (q) { return q.rule; }).join());
+        check("22 editor highlights exactly the current rule", pills22.filter(function (q) { return q.selected; }).length === 1 && pills22.filter(function (q) { return q.selected; })[0].rule === e0.rule, e0.rule);
+        var cols22 = pills22.map(function (q) { return q.fill.map(function (v) { return v.toFixed(2); }).join(","); });
+        check("22 editor pills are coloured per rule (all different)", cols22.filter(function (c, i) { return cols22.indexOf(c) === i; }).length === 5, cols22.join(" | "));
+        check("22 editor does not cover objects, labels, Delete pill, toolbar or the view edge", T.editorOverlaps() === 0, "overlaps " + T.editorOverlaps());
+        var pr22 = T.editorRect(), m22 = ang(e0);
+        check("22 editor sits next to its link", Math.hypot(pr22.x - m22.x, pr22.y - m22.y) < 0.33, "dist " + Math.hypot(pr22.x - m22.x, pr22.y - m22.y).toFixed(3));
+        var f22 = T.frames(), p22 = snap(); yield 1;
+        check("22 simulation keeps running while the editor is open", api.getState() === "live" && T.frames() - f22 >= 3 && moved(p22, snap()) > 0.05, "frames " + (T.frames() - f22) + " moved " + moved(p22, snap()).toFixed(2));
+        // apply each rule
+        var okAll = true, info22 = "";
+        for (var ri = 0; ri < 5; ri++) {
+            T.openEditor(e0); yield 0.4;
+            var fr = T.frames(), pp = snap();
+            api.test.pressEditorPill(ri); yield 0.3;
+            var good = e0.rule === RULES5[ri] && T.editorOpen() === -1 && api.getState() === "live";
+            if (!good) { okAll = false; info22 += " fail:" + RULES5[ri] + "=" + e0.rule + "/open" + T.editorOpen(); }
+        }
+        check("22 tapping a pill applies that rule instantly and closes the panel (all 5, simulation stays live)", okAll, info22);
+        var fr2 = T.frames(); nodes[0].vel = new vec3(8, 0, 0); var px2 = nodes[0].pos.x; yield 1;   // kick one object: physics must still integrate after the edit
+        check("22 simulation keeps running after an edit", T.frames() - fr2 >= 3 && api.getState() === "live" && Math.abs(nodes[0].pos.x - px2) > 0.5, "moved " + Math.abs(nodes[0].pos.x - px2).toFixed(2));
+        // behaviour changes immediately: Attract -> Repel pushes the pair apart without pause or reset
+        T.setRule(e0, "ATTRACT", "test"); T.setRule(e1, "ATTRACT", "test"); api.reset(); yield 0.2; api.activate(); yield 0.8;
+        var dA = nodes[0].pos.distance(nodes[1].pos);
+        T.openEditor(e0); yield 0.4; api.test.pressEditorPill(1); yield 1.2;
+        check("22 live edit changes behaviour at once (Attract -> Repel separates the pair, no pause/restart)", e0.rule === "REPEL" && nodes[0].pos.distance(nodes[1].pos) > dA + 1 && api.getState() === "live", "before " + dA.toFixed(1) + " after " + nodes[0].pos.distance(nodes[1].pos).toFixed(1));
+        // closing
+        T.openEditor(e0); yield 0.2;
+        var g1 = T.editorTouch(0.9, 0.9);
+        check("22 a tap right after opening does not close it (grace)", T.editorOpen() === 0 && g1 === false);
+        yield 0.5;
+        var rc = T.editorRect(), inside = T.editorTouch(rc.x, rc.y);
+        check("22 a tap on the panel keeps it open", T.editorOpen() === 0 && inside === false);
+        var far = T.editorTouch(rc.x > 0 ? -0.25 : 0.25, 0.05);
+        check("22 a tap elsewhere closes it", T.editorOpen() === -1 && far === true);
+        T.toggleEditor(e0); yield 0.3; T.toggleEditor(e1); yield 0.3;
+        check("22 tapping another link moves the editor to it", T.editorOpen() === 1);
+        T.closeEditor();
+        // follows the link when objects move
+        api.pause(); yield 0.2;
+        T.place(0, new vec3(-14, -8, -95)); T.place(1, new vec3(14, -8, -95)); T.place(2, new vec3(0, 5, -95)); yield 0.3;
+        T.openEditor(e0); yield 0.5;
+        var r1 = T.editorRect(), mm1 = ang(e0);
+        T.place(0, new vec3(-14, 5, -95)); T.place(1, new vec3(0, -9, -95)); T.place(2, new vec3(14, 3, -95)); yield 0.5;
+        var r2 = T.editorRect(), mm2 = ang(e0);
+        check("22 editor follows its link when the objects move", Math.hypot(r2.x - r1.x, r2.y - r1.y) > 0.01 && Math.hypot(r2.x - mm2.x, r2.y - mm2.y) < 0.33 && T.editorOverlaps() === 0, "moved " + Math.hypot(r2.x - r1.x, r2.y - r1.y).toFixed(3) + " overlaps " + T.editorOverlaps());
+        T.closeEditor(); api.resume(); api.reset(); yield 0.2;
+        // dense layouts: universe (models + 3 labels) and a Delete pill; the panel never overlaps, live and still
+        script.controller.demoStage = "universe"; api.applyDemoSetup(); yield 0.6;
+        var bad22 = 0, samples22 = 0;
+        for (var li = 0; li < conns.length; li++) {
+            T.openEditor(conns[li]); yield 0.5; samples22++;
+            if (T.editorOverlaps() !== 0) { bad22++; }
+        }
+        T.tap(1); yield 0.4; T.openEditor(conns[0]); yield 0.5; samples22++;
+        if (T.editorOverlaps() !== 0) { bad22++; }
+        T.tap(1); yield 0.2;
+        api.activate();
+        for (var tk = 0; tk < 12; tk++) { T.openEditor(conns[tk % conns.length]); yield 0.5; samples22++; if (T.editorOverlaps() !== 0) { bad22++; } }
+        T.closeEditor();
+        check("22 editor never overlaps objects, labels, Delete pill or toolbar (universe layout, still and live)", bad22 === 0, bad22 + " bad of " + samples22);
+        T.openEditor(conns[0]); yield 0.4; T.clearLinks(); yield 0.3;
+        check("22 editor closes when its link is removed", T.editorOpen() === -1);
+        api.reset(); yield 0.2;
+        script.controller.demoStage = ""; api.applyDemoSetup(); yield 0.3;
+
         api.reset();
         var pass = results.filter(function (r) { return r; }).length;
         print("RULESHIFT TEST SUMMARY: " + pass + "/" + results.length + " PASS" + (pass === results.length ? " - ALL PASS" : " - FAILURES"));
     }
     script.createEvent("OnStartEvent").bind(function () {
         api = script.controller.api; T = api.test; nodes = T.nodes; conns = T.connections;
+        T.setFixedStep(SIM_STEP);
         gen = run();
     });
     script.createEvent("UpdateEvent").bind(function (e) {
         if (!gen) { return; }
         if (monitorOn) { mon(); }
-        wait -= e.getDeltaTime();
+        wait -= (T.fixedStep() > 0 ? T.fixedStep() : e.getDeltaTime());   // the suite runs on the controller's fixed simulation clock (see SIM_STEP): waits count simulated seconds, not wall time
         if (wait > 0) { return; }
         var r = gen.next();
         if (r.done) { gen = null; } else { wait = r.value; }
@@ -761,6 +839,38 @@ if (script.showUniverse) {
             if (st === 0 && el > 1) { script.controller.demoStage = "universe"; api.applyDemoSetup(); st = 1; print("RULESHIFT SHOW opening"); }
             else if (st === 1 && el > 11) { api.activate(); st = 2; print("RULESHIFT SHOW play"); }
             else if (st === 2 && T.connections.some(function (c) { return c.rule === "REPEL"; }) && el > 11.8) { st = 3; print("RULESHIFT SHOW chain-flipped"); }
+        });
+    });
+}
+
+// Visual check (not a test): demo scene running live with the rule editor open on the first link; prints a marker for the screenshot.
+if (script.showEditor) {
+    script.createEvent("OnStartEvent").bind(function () {
+        var api = script.controller.api, T = api.test, st = 0, el = 0;
+        script.createEvent("UpdateEvent").bind(function (e) {
+            el += e.getDeltaTime();
+            if (st === 0 && el > 1) { api.loadDemo(); st = 1; }
+            else if (st === 1 && el > 2) { api.activate(); st = 2; }
+            else if (st === 2 && el > 4) { T.openEditor(T.connections[0]); st = 3; }
+            else if (st === 3 && el > 6) { print("RULESHIFT SHOWEDITOR open state=" + api.getState() + " overlaps=" + T.editorOverlaps()); st = 4; }
+        });
+    });
+}
+
+// Visual check (not a test): Grow -> Collision Trigger -> Attract chain with the cause pulse stretched to 6 s; marker printed mid-flight.
+if (script.showGrow) {
+    script.createEvent("OnStartEvent").bind(function () {
+        var api = script.controller.api, T = api.test, st = 0, el = 0;
+        function mk(x, y, col) { var i = api.spawn({ shape: "sphere", sizeKey: "M", color: col, bounce: "low", weight: "light" }); T.place(i, new vec3(x, y, -95)); T.nodes[i].initial = new vec3(x, y, -95); return i; }
+        script.createEvent("UpdateEvent").bind(function (e) {
+            el += e.getDeltaTime();
+            if (st === 0 && el > 1) {
+                api.clearAll(); T.cause.setTime(6);
+                mk(-5, -8, [1, 0, 0.35]); mk(5, -8, [0, 0.85, 1]); mk(15.4, -8, [1, 0.9, 0]); mk(10, 5, [0.65, 0.3, 1]);
+                T.connect(0, 1, "GROW"); T.connect(1, 2, "COLLISION_TRIGGER"); T.connect(2, 3, "ATTRACT");
+                st = 1;
+            } else if (st === 1 && el > 3) { api.activate(); st = 2; }
+            else if (st === 2 && el > 5) { print("RULESHIFT SHOWGROW mid-chain grow=" + T.nodes[1].growK.toFixed(2) + " ct fires=" + T.fires(T.connections[1]) + " pulses=" + T.cause.active() + " link2=" + T.connections[2].rule); st = 3; }
         });
     });
 }

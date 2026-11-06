@@ -334,7 +334,11 @@ function placeAtScreen(sp) {
     }
     return placeFromRay(o, d);
 }
-script.createEvent("TouchStartEvent").bind(function (e) { placeAtScreen(e.getTouchPosition()); });
+script.createEvent("TouchStartEvent").bind(function (e) {
+    var sp = e.getTouchPosition();
+    if (editorLink && script.camera) { var a = screenToAng(sp); editorTouch(a.x, a.y); }
+    placeAtScreen(sp);
+});
 
 // ---------- links ----------
 var HALO_SCALE = 1.7;
@@ -786,6 +790,115 @@ function updateVisual(c) {
     }
 }
 
+// ---------- Rule editor: tapping a link opens a panel of all five rules next to it ----------
+// The panel is drawn at EDITOR.d (nearer than the world, like the Delete pill) and placed in screen/angular space so it never covers
+// an object, a label, the Delete pill, the toolbar or the edge of the view; it is re-placed every frame, so it follows the link.
+// Three compact layouts of the same five pills (column, 3x2 grid, row): the view is mostly filled by the stage, so the panel takes whichever fits best beside the link.
+var EDITOR = { d: 85, pillW: 8.0, pillH: 3.0, gap: 0.4, pad: 0.6, layouts: [] };
+[1, 3, 5].forEach(function (cols) {
+    var rows = Math.ceil(ALL_RULES.length / cols);
+    EDITOR.layouts.push({ cols: cols, rows: rows, w: cols * EDITOR.pillW + (cols - 1) * EDITOR.gap + 2 * EDITOR.pad, h: rows * EDITOR.pillH + (rows - 1) * EDITOR.gap + 2 * EDITOR.pad });
+});
+var EDITOR_NAMES = { ATTRACT: "Attract", REPEL: "Repel", COLLISION_TRIGGER: "Collision Trigger", TRANSFER: "Transfer", GROW: "Grow" };
+var EDITOR_GRACE = 0.3, EDITOR_MARGIN = 0.9, EDITOR_STEP = 1.5, EDITOR_STICK = 1.5;   // cm: gap kept to everything / scan step / how much worse the current spot may be before it moves
+var editorLink = null, editorRect = null, editorOpenedAt = 0, toolbarTopAng = -10;
+function screenToAng(sp) {   // screen point (0..1) -> angular position (x/depth, y/depth); the camera sits at the origin looking down -z
+    var cam = script.camera, o = cam.getTransform().getWorldPosition(), d = cam.screenSpaceToWorldSpace(sp, 100).sub(o);
+    var dep = Math.max(-d.z, 0.0001);
+    return { x: d.x / dep, y: d.y / dep };
+}
+function openEditor(c) {
+    editorLink = c; editorRect = null; editorOpenedAt = elapsed;
+    print("RULESHIFT editor open " + c.A.obj.name + "-" + c.B.obj.name + " (" + c.rule + ")");
+}
+function closeEditor(why) {
+    if (!editorLink) { return; }
+    editorLink = null; editorRect = null;
+    print("RULESHIFT editor closed (" + why + ")");
+}
+function toggleEditor(c) { if (editorLink === c) { closeEditor("link tapped again"); } else { openEditor(c); } }
+function applyEditorRule(rule) {   // instant: the simulation keeps running, a short pulse crosses the link like any manual edit
+    var c = editorLink;
+    if (!c || !c.active || ALL_RULES.indexOf(rule) < 0) { return false; }
+    if (c.rule !== rule) { setRule(c, rule, "editor"); launchCause(c, "tap", c.A.pos, c.A, c.B, TAP_PULSE_TIME); }
+    closeEditor("applied " + rule);
+    return true;
+}
+function editorTouch(ax, ay) {   // a press at angular (ax, ay): outside the panel closes it (a press right after opening is ignored)
+    if (!editorLink || elapsed - editorOpenedAt < EDITOR_GRACE) { return false; }
+    var m = 0.5 / EDITOR.d, r = editorRect;
+    if (r && Math.abs(ax - r.x) <= r.hw + m && Math.abs(ay - r.y) <= r.hh + m) { return false; }
+    closeEditor("tap elsewhere");
+    return true;
+}
+function editorObstacles(withNodes) {   // everything the panel must keep clear of, in angular space
+    var out = { discs: [], rects: [] };
+    if (withNodes) { nodes.forEach(function (n) { var nd = Math.max(-n.pos.z, 1); out.discs.push({ x: n.pos.x / nd, y: n.pos.y / nd, r: n.radius / nd }); }); }
+    placedLabels.forEach(function (r) { out.rects.push(r); });
+    [pillRect, testPill].forEach(function (r) { if (r) { out.rects.push(r); } });
+    return out;
+}
+function editorBlocked(cx, cy, hw, hh, ob, margin) {
+    var v = script.api.view(), m = margin / EDITOR.d;
+    if (Math.abs(cx) + hw > v.halfW / 95 - m || cy + hh > v.halfH / 95 - m || cy - hh < toolbarTopAng + m) { return true; }
+    for (var i = 0; i < ob.discs.length; i++) {
+        var d = ob.discs[i], dx = Math.max(Math.abs(cx - d.x) - hw, 0), dy = Math.max(Math.abs(cy - d.y) - hh, 0), rr = d.r + m;
+        if (dx * dx + dy * dy < rr * rr) { return true; }
+    }
+    for (var j = 0; j < ob.rects.length; j++) {
+        var r = ob.rects[j];
+        if (Math.abs(cx - r.x) < hw + r.hw + m && Math.abs(cy - r.y) < hh + r.hh + m) { return true; }
+    }
+    return false;
+}
+function updateEditor() {
+    if (!editorLink) { editorRect = null; return; }
+    var c = editorLink;
+    if (!c.active || slots.indexOf(c) < 0) { closeEditor("link removed"); return; }
+    var v = script.api.view();
+    var A = c.A.pos, B = c.B.pos, pts = [];
+    for (var k = 0; k <= 4; k++) { var q = A.add(B.sub(A).uniformScale(k / 4)), qd = Math.max(-q.z, 1); pts.push({ x: q.x / qd, y: q.y / qd }); }
+    var mx = pts[2].x, my = pts[2].y;
+    function cost(cx, cy, hw, hh) {   // distance to the link's middle, heavily penalised when the panel would cover the link itself
+        var cv = 0;
+        for (var i = 0; i < pts.length; i++) { if (Math.abs(pts[i].x - cx) < hw && Math.abs(pts[i].y - cy) < hh) { cv = 0.5; break; } }
+        return Math.sqrt((cx - mx) * (cx - mx) + (cy - my) * (cy - my)) + cv;
+    }
+    var ob = editorObstacles(true), ob2 = null, step = EDITOR_STEP / EDITOR.d;
+    var best = null, bestCost = 1e9, overlap = false;
+    function scan(obs) {
+        EDITOR.layouts.forEach(function (L, li) {
+            var hw = L.w / 2 / EDITOR.d, hh = L.h / 2 / EDITOR.d;
+            for (var gy = -v.halfH / 95 + hh; gy <= v.halfH / 95 - hh + 1e-6; gy += step) {
+                for (var gx = -v.halfW / 95 + hw; gx <= v.halfW / 95 - hw + 1e-6; gx += step) {
+                    var cc = cost(gx, gy, hw, hh);
+                    if (cc >= bestCost) { continue; }
+                    if (!editorBlocked(gx, gy, hw, hh, obs, EDITOR_MARGIN)) { best = { x: gx, y: gy, li: li, hw: hw, hh: hh }; bestCost = cc; }
+                }
+            }
+        });
+    }
+    scan(ob);
+    if (!best) { ob2 = editorObstacles(false); scan(ob2); overlap = !!best; }   // crowded: keep clear of labels and the toolbar at least
+    if (!best) {
+        var L0 = EDITOR.layouts[1], h0 = L0.w / 2 / EDITOR.d, k0 = L0.h / 2 / EDITOR.d;
+        best = { x: Math.max(-v.halfW / 95 + h0, Math.min(v.halfW / 95 - h0, mx)), y: Math.max(toolbarTopAng + k0, Math.min(v.halfH / 95 - k0, my)), li: 1, hw: h0, hh: k0 }; overlap = true;
+    }
+    if (editorRect && !overlap) {   // stay put (same layout) unless a clearly better spot exists
+        var cur = EDITOR.layouts[editorRect.li], chw = cur.w / 2 / EDITOR.d, chh = cur.h / 2 / EDITOR.d;
+        if (!editorBlocked(editorRect.x, editorRect.y, chw, chh, ob, EDITOR_MARGIN) && cost(editorRect.x, editorRect.y, chw, chh) <= bestCost + EDITOR_STICK / 95) {
+            best = { x: editorRect.x, y: editorRect.y, li: editorRect.li, hw: chw, hh: chh };
+        }
+    }
+    editorRect = { x: best.x, y: best.y, hw: best.hw, hh: best.hh, li: best.li, overlap: overlap };
+}
+script.api.setToolbarTop = function (ang) { toolbarTopAng = ang; };
+script.api.editorSpec = EDITOR;
+script.api.editorRules = function () { return ALL_RULES.map(function (r) { var k = RULE_COLOR[r]; return { rule: r, name: EDITOR_NAMES[r], color: [k.r, k.g, k.b] }; }); };
+script.api.editorInfo = function () { return editorLink && editorRect ? { x: editorRect.x, y: editorRect.y, rule: editorLink.rule, layout: editorRect.li } : null; };
+script.api.applyEditorRule = applyEditorRule;
+script.api.closeEditor = function () { closeEditor("closed"); };
+
 // Modes: creation (stationary, start) -> live <-> paused. Reset -> creation.
 var state = "creation";
 var stateListeners = [];
@@ -918,12 +1031,24 @@ var frameCount = 0;
 script.api.test = {
     pillRect: function () { return pillRect; },
     setTestPill: function (r) { testPill = r; },
-    setFixedStep: function (s) { fixedStep = s; },   // read/write hooks for RuleShiftTests.js
+    setFixedStep: function (s) { fixedStep = s; }, fixedStep: function () { return fixedStep; },   // read/write hooks for RuleShiftTests.js
     nodes: nodes, connections: connections, slots: slots,
     tap: function (i) { handleTapNode(nodes[i]); },
     pressStart: function (i) { pressStartNode(nodes[i]); },
     pressEnd: function (i, allowTap) { pressEndNode(nodes[i], allowTap); },
     growNode: growNode, applyGrow: applyGrow, GROW_CAP: GROW_CAP,
+    openEditor: openEditor, closeEditor: function () { closeEditor("test"); }, editorTouch: editorTouch, toggleEditor: toggleEditor,
+    editorOpen: function () { return editorLink ? slots.indexOf(editorLink) : -1; },
+    editorRect: function () { return editorRect; },
+    editorOverlaps: function () {   // how many things the placed panel covers (nodes, labels, Delete pill) plus whether it leaves the view / touches the toolbar
+        if (!editorRect) { return -1; }
+        var ob = editorObstacles(true), r = editorRect, n = 0, v = script.api.view();
+        ob.discs.forEach(function (d) { var dx = Math.max(Math.abs(r.x - d.x) - r.hw, 0), dy = Math.max(Math.abs(r.y - d.y) - r.hh, 0); if (dx * dx + dy * dy < d.r * d.r) { n++; } });
+        ob.rects.forEach(function (o) { if (Math.abs(r.x - o.x) < r.hw + o.hw && Math.abs(r.y - o.y) < r.hh + o.hh) { n++; } });
+        if (Math.abs(r.x) + r.hw > v.halfW / 95 || r.y + r.hh > v.halfH / 95 || r.y - r.hh < toolbarTopAng) { n++; }
+        return n;
+    },
+    editorMid: function () { var c = editorLink; if (!c) { return null; } var m = c.A.pos.add(c.B.pos).uniformScale(0.5), d = Math.max(-m.z, 1); return { x: m.x / d, y: m.y / d }; },
     clearLinks: clearLinks, selected: function () { return selNode ? nodeIndex(selNode) : -1; }, setRule: setRule, cycleRule: cycleRule,
     pendingBinds: function () { return pendingBinds.length; },
     cause: {
@@ -952,11 +1077,12 @@ script.api.test = {
 var SUBSTEP = 0.02, MAX_SUBSTEPS = 6, fixedStep = 0;   // fixedStep > 0 (tests only) replaces real dt with a constant step
 var elapsed = 0, lastToggle = 0;
 script.createEvent("UpdateEvent").bind(function (e) {
-    var dt = Math.min(e.getDeltaTime(), 0.05);
+    var fdt = fixedStep > 0 ? fixedStep : e.getDeltaTime();   // tests run on a fixed simulation clock: every time source below advances by the same step per frame, independent of host load
+    var dt = Math.min(fdt, 0.05);
     frameCount++;
     lastDt = dt;
-    realDt = Math.min(e.getDeltaTime(), 0.25);   // wall-clock step: cause pulses and flashes keep real-time pacing at low Preview fps
-    elapsed += e.getDeltaTime();
+    realDt = Math.min(fdt, 0.25);   // wall-clock step: cause pulses and flashes keep real-time pacing at low Preview fps
+    elapsed += fdt;
     // bind SIK events on clones once their Interactable has initialised
     for (var pi = pendingBinds.length - 1; pi >= 0; pi--) {
         var pb = pendingBinds[pi], done = false, obj = pb.kind === "node" ? pb.n.obj : pb.c.visual;
@@ -971,7 +1097,7 @@ script.createEvent("UpdateEvent").bind(function (e) {
                 if (sc.onTriggerCanceled) { sc.onTriggerCanceled.add(function () { pressEndNode(n, false); }); }
             } else {
                 var c = pb.c;
-                sc.onTriggerStart.add(function () { if (c.active) { cycleRule(c, "tap"); } });
+                sc.onTriggerStart.add(function () { if (c.active) { toggleEditor(c); } });
             }
         });
         if (done) { pendingBinds.splice(pi, 1); }
@@ -982,7 +1108,7 @@ script.createEvent("UpdateEvent").bind(function (e) {
     }
     syncDragged();
     if (state === "live") {   // real elapsed time, split into fixed substeps so motion keeps real-time speed at low fps without going unstable
-        var total = fixedStep > 0 ? fixedStep : Math.min(e.getDeltaTime(), MAX_SUBSTEPS * SUBSTEP);
+        var total = fixedStep > 0 ? fixedStep : Math.min(fdt, MAX_SUBSTEPS * SUBSTEP);
         var steps = Math.max(1, Math.min(MAX_SUBSTEPS, Math.ceil(total / SUBSTEP - 1e-6)));
         lastDt = total;
         for (var si = 0; si < steps; si++) {
@@ -1000,10 +1126,11 @@ script.createEvent("UpdateEvent").bind(function (e) {
     updateImagine(dt);
     updateSelection();
     hintObj.enabled = !!pendingPlace && !goalEnabled;
-    updateGoal(Math.min(e.getDeltaTime(), 0.25));   // real time, so goal timers don't slow down at low frame rates
+    updateGoal(Math.min(fdt, 0.25));   // real time, so goal timers don't slow down at low frame rates
     placedLabels.length = 0;
     connections.forEach(updateLabel);
     connections.forEach(updateVisual);
+    updateEditor();
 });
 script.createEvent("OnStartEvent").bind(function () {
     if (script.demoPreset) { applyDemoSetup(); }

@@ -77,6 +77,11 @@ export class RuleShiftControls extends BaseScriptComponent {
   private markers: {[g: string]: SceneObject[]} = {}
   private halfW = 35
   private halfH = 27
+  private editorRoot: SceneObject
+  private editorBgs: SceneObject[] = []
+  private editorRows: {rule: string; pill: Pill; fill: SceneObject; border: SceneObject; color: number[]}[] = []
+  private editorShown = false
+  private editorTextFit = 0
 
   onAwake() {
     const v = this.controller.api.view()
@@ -85,6 +90,7 @@ export class RuleShiftControls extends BaseScriptComponent {
     this.buildToolbar()
     this.buildPalette()
     this.buildDelete()
+    this.buildEditor()
 
     this.createEvent("OnStartEvent").bind(() => {
       this.controller.api.onState((st: string) => this.onState(st))
@@ -94,6 +100,7 @@ export class RuleShiftControls extends BaseScriptComponent {
     })
     this.createEvent("UpdateEvent").bind(() => {
       this.updateFloating()
+      this.updateEditor()
       this.updateLabelFit()
       if (this.listening) {
         // no timeout until the first partial arrives (10 s listening window), then 2 s of silence after the last partial
@@ -149,6 +156,7 @@ export class RuleShiftControls extends BaseScriptComponent {
     const total = pw * 7 + gap * 4 + groupGap * 2
     const y = -this.halfH + 0.8 + h / 2
     api.makePlate("Toolbar Strip", total + 1.4, h + 1.2, 0.4, new vec3(0, y, Z - 1.2), DARK, -8)
+    api.setToolbarTop((y + (h + 1.2) / 2) / (-Z + 1.2)) // top edge of the toolbar in angular space: the rule editor panel stays above it
     let x = -total / 2
     let gi = 0
     let left = groups[0]
@@ -461,6 +469,86 @@ export class RuleShiftControls extends BaseScriptComponent {
     this.deletePlate.getTransform().setWorldPosition(new vec3(nearer.x, nearer.y, nearer.z - 0.6))
     // tell the controller where the pill is on screen so link labels keep clear of it (angular space: the pill is drawn at depth 70)
     if (api.setPillRect) api.setPillRect({x: nearer.x / 70, y: nearer.y / 70, hw: (8.2 / 2 + 0.6) / 70, hh: (3.4 / 2 + 0.4) / 70})
+  }
+
+  // ---- Rule editor: five coloured rule pills in a column, placed beside the tapped link by the controller ----
+  private buildEditor() {
+    const api = this.controller.api
+    const E = api.editorSpec
+    this.editorRoot = global.scene.createSceneObject("Rule Editor")
+    E.layouts.forEach((L: any, li: number) => this.editorBgs.push(api.makePlate("Rule Editor Plate " + li, L.w, L.h, 0.4, new vec3(0, 0, Z), DARK, -8)))
+    const rules = api.editorRules()
+    rules.forEach((r: any, i: number) => {
+      const border = api.makePlate("Rule Border " + r.rule, E.pillW + 0.5, E.pillH + 0.5, 0.2, new vec3(0, 0, Z), WHITE, -6)
+      const fill = api.makePlate("Rule Fill " + r.rule, E.pillW, E.pillH, 0.2, new vec3(0, 0, Z), PILL, -5)
+      const pill = this.makePill(this.editorRoot, "Rule" + i, r.name, null, new vec3(0, 0, 0.5), new vec2(E.pillW, E.pillH), 42, true)
+      pill.button.onTriggerUp.add(() => this.controller.api.applyEditorRule(r.rule))
+      pill.button.onInitialized.add(() => {
+        pill.button.opacity = 0 // the Button's own grey plate would cover the rule colours drawn behind it
+      })
+      this.editorRows.push({rule: r.rule, pill, fill, border, color: r.color})
+    })
+    this.setEditorShown(false)
+    api.test.editorPills = () => this.editorRows.map((row) => ({rule: row.rule, selected: row.border.enabled, fill: this.fillColor(row)}))
+    api.test.pressEditorPill = (i: number) => this.controller.api.applyEditorRule(this.editorRows[i].rule)
+    api.test.editorShown = () => this.editorShown
+  }
+
+  private fillColor(row: {fill: SceneObject}): number[] {
+    const c = row.fill.getComponent("Component.RenderMeshVisual").mainPass.baseColor
+    return [c.r, c.g, c.b]
+  }
+
+  private setEditorShown(on: boolean) {
+    this.editorShown = on
+    this.editorRoot.enabled = on
+    this.editorBgs.forEach((b) => (b.enabled = on))
+    this.editorRows.forEach((r) => {
+      r.fill.enabled = on
+      r.border.enabled = on && r.border.enabled
+    })
+  }
+
+  private updateEditor() {
+    const api = this.controller.api
+    const info = api.editorInfo()
+    if (!info) {
+      if (this.editorShown) this.setEditorShown(false)
+      return
+    }
+    if (this.palette.enabled) this.setPalette(false) // the Create band would sit in the panel's way
+    const E = api.editorSpec
+    if (!this.editorShown) this.setEditorShown(true)
+    if (this.editorTextFit < 8) {
+      // labels never wrap ("Collision Trigger" stays on one line); report the measured widths once
+      this.editorTextFit++
+      const ws = this.editorRows.map((row) => {
+        const tc: Text | null = (row.pill.content as any).textComponent
+        if (!tc) return -1
+        tc.horizontalOverflow = HorizontalOverflow.Overflow
+        const bb = tc.getBoundingBox()
+        return bb.right - bb.left
+      })
+      if (this.editorTextFit === 8) print("RULESHIFT editor labels width cm: " + ws.map((w) => w.toFixed(2)).join(", ") + " (pill " + E.pillW + ")")
+    }
+    const c = new vec3(info.x * E.d, info.y * E.d, -E.d)
+    this.editorRoot.getTransform().setWorldPosition(c)
+    const L = E.layouts[info.layout]
+    this.editorBgs.forEach((b, li) => {
+      b.enabled = li === info.layout
+      b.getTransform().setWorldPosition(new vec3(c.x, c.y, c.z - 1.2))
+    })
+    this.editorRows.forEach((row, i) => {
+      const lx = -L.w / 2 + E.pad + E.pillW / 2 + (i % L.cols) * (E.pillW + E.gap)
+      const ly = L.h / 2 - E.pad - E.pillH / 2 - Math.floor(i / L.cols) * (E.pillH + E.gap)
+      row.pill.button.sceneObject.getTransform().setLocalPosition(new vec3(lx, ly, 0.5))
+      const sel = row.rule === info.rule
+      const k = sel ? 0.9 : 0.42 // the current rule is bright and outlined; the others are dimmed versions of their colours
+      row.fill.getTransform().setWorldPosition(new vec3(c.x + lx, c.y + ly, c.z - 0.6))
+      row.border.getTransform().setWorldPosition(new vec3(c.x + lx, c.y + ly, c.z - 0.9))
+      row.border.enabled = sel
+      row.fill.getComponent("Component.RenderMeshVisual").mainPass.baseColor = new vec4(row.color[0] * k, row.color[1] * k, row.color[2] * k, 1)
+    })
   }
 
   private makePill(parent: SceneObject, name: string, label: string, icon: Texture | null, pos: vec3, size: vec2, textSize: number, local = false, iconSize = 2.2, stacked = false): Pill {
