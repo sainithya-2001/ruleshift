@@ -449,6 +449,7 @@ export class RuleShiftControls extends BaseScriptComponent {
     if (!info || info.busy || this.palette.enabled) {
       this.deleteObj.enabled = false
       this.deletePlate.enabled = false
+      if (api.setPillRect) api.setPillRect(null)
       return
     }
     this.deleteObj.enabled = true
@@ -458,6 +459,8 @@ export class RuleShiftControls extends BaseScriptComponent {
     const nearer = q.uniformScale(70 / -q.z)
     this.deleteObj.getTransform().setWorldPosition(nearer)
     this.deletePlate.getTransform().setWorldPosition(new vec3(nearer.x, nearer.y, nearer.z - 0.6))
+    // tell the controller where the pill is on screen so link labels keep clear of it (angular space: the pill is drawn at depth 70)
+    if (api.setPillRect) api.setPillRect({x: nearer.x / 70, y: nearer.y / 70, hw: (8.2 / 2 + 0.6) / 70, hh: (3.4 / 2 + 0.4) / 70})
   }
 
   private makePill(parent: SceneObject, name: string, label: string, icon: Texture | null, pos: vec3, size: vec2, textSize: number, local = false, iconSize = 2.2, stacked = false): Pill {

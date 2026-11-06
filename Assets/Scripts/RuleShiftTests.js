@@ -2,6 +2,7 @@
 // @input bool runTests = false
 // @input bool liveImagine = false
 // @input bool showCause = false
+// @input bool showUniverse = false
 // @input string liveImaginePrompt = "a floating paper lantern"
 
 // Self-driving test harness for RULESHIFT. Set runTests=true, run Preview, read the RULESHIFT TEST lines.
@@ -583,6 +584,37 @@ if (script.runTests) {
         script.controller.demoStage = ""; api.applyDemoSetup(); yield 0.4;
         check("19 demoPreset opening: empty stage, no placement hint, creation state", nodes.length === 0 && T.hintVisible() === false && api.getState() === "creation");
 
+        // 20 universe preset: saved models load instantly as normal nodes, links ready, chain fires on Play; Delete pill vs labels
+        script.controller.demoStage = "universe"; api.applyDemoSetup(); yield 0.6;
+        var nm20 = nodes.map(function (n) { return n.obj.name; }).join(",");
+        check("20 universe: island, creature, core and tree load as models instantly", nm20 === "Island,Creature,Core,Tree" && nodes.every(function (n) { return n.imagined === true && !!n.modelRoot; }), nm20);
+        var rr20 = nodes.map(function (n) { return n.radius; });
+        check("20 universe: island ~1.5x and creature ~0.7x the base size, island heavy and creature light", Math.abs(rr20[0] / rr20[2] - 1.5) < 0.05 && Math.abs(rr20[1] / rr20[2] - 0.7) < 0.05 && nodes[0].accel < 1 && nodes[1].accel > 1, rr20.map(function (r) { return r.toFixed(1); }).join(","));
+        var cc20 = T.slots.filter(function (c) { return c.active && c.A.obj.name === "Creature" && c.B.obj.name === "Core"; })[0];
+        var ct20 = T.slots.filter(function (c) { return c.active && ((c.A.obj.name === "Core" && c.B.obj.name === "Tree") || (c.A.obj.name === "Tree" && c.B.obj.name === "Core")); })[0];
+        var ci20 = T.slots.filter(function (c) { return c.active && c.A.obj.name === "Creature" && c.B.obj.name === "Island"; })[0];
+        check("20 universe: links ready (creature-core ATTRACT, core-tree COLLISION TRIGGER, creature-island ATTRACT)", conns.length === 3 && !!cc20 && !!ct20 && !!ci20 && cc20.rule === "ATTRACT" && ct20.rule === "COLLISION_TRIGGER" && ci20.rule === "ATTRACT");
+        check("20 universe: creation state, no hint, no overlapping nodes", api.getState() === "creation" && T.hintVisible() === false);
+        yield 0.3; var lo20 = 0; T.connections.forEach(function (c) { var li = T.labelInfo(c); if (!li.ext || li.hits) { lo20++; } });
+        check("20 universe: opening frame has no overlapping labels (node or label)", lo20 === 0 && T.labelOverlaps() === 0, "bad " + lo20 + " label-label " + T.labelOverlaps());
+        // Delete pill: sits above the selected object's top edge, and labels keep clear of it
+        T.tap(1); yield 0.5;
+        var pr = T.pillRect(), sn = nodes[1];
+        check("20 Delete pill is above the selected object's top edge", !!pr && (pr.y - pr.hh) >= (sn.pos.y + sn.radius) / -sn.pos.z - 0.0001, pr ? "pill bottom " + (pr.y - pr.hh).toFixed(4) + " node top " + ((sn.pos.y + sn.radius) / -sn.pos.z).toFixed(4) : "no pill");
+        var lp20 = 0; T.connections.forEach(function (c) { var r = c.lblRect; if (r && pr && Math.abs(r.x - pr.x) < r.hw + pr.hw && Math.abs(r.y - pr.y) < r.hh + pr.hh) { lp20++; } });
+        check("20 Link labels keep clear of the Delete pill", lp20 === 0, "overlapping " + lp20);
+        var tr20 = ct20.lblRect; T.setTestPill({ x: tr20.x, y: tr20.y, hw: 0.04, hh: 0.02 }); yield 0.3;
+        var r2 = ct20.lblRect, fk = { x: tr20.x, y: tr20.y, hw: 0.04, hh: 0.02 };
+        check("20 A pill placed on a label pushes the label off it", !(Math.abs(r2.x - fk.x) < r2.hw + fk.hw && Math.abs(r2.y - fk.y) < r2.hh + fk.hh));
+        T.setTestPill(null); T.tap(1); yield 0.2;
+        api.activate(); var g20 = 0;
+        while (g20 < 8 && T.fires(ct20) < 1) { yield 0.25; g20 += 0.25; }
+        check("20 universe: on Play the core meets the tree and the collision fires within 3-5 s", T.fires(ct20) >= 1 && g20 >= 1 && g20 <= 6, "after " + g20.toFixed(2) + "s");
+        var g20b = 0; while (g20b < 4 && cc20.rule !== "REPEL") { yield 0.2; g20b += 0.2; }
+        check("20 universe: the collision's pulse flips creature-core to REPEL (chain reaction)", cc20.rule === "REPEL", "rule " + cc20.rule);
+        api.reset(); yield 0.2;
+        script.controller.demoStage = ""; api.applyDemoSetup(); yield 0.3;
+
         api.reset();
         var pass = results.filter(function (r) { return r; }).length;
         print("RULESHIFT TEST SUMMARY: " + pass + "/" + results.length + " PASS" + (pass === results.length ? " - ALL PASS" : " - FAILURES"));
@@ -651,6 +683,19 @@ if (script.showCause) {
             } else if (st === 2 && el > 4.5) {
                 print("RULESHIFT SHOWCAUSE mid-flight active=" + T.cause.active() + " rule=" + T.connections[1].rule); st = 3;
             }
+        });
+    });
+}
+
+// Visual check (not a test): load the universe stage, wait for a screenshot, press Play, print a marker once the collision fires and the chain has flipped.
+if (script.showUniverse) {
+    script.createEvent("OnStartEvent").bind(function () {
+        var api = script.controller.api, T = api.test, st = 0, el = 0;
+        script.createEvent("UpdateEvent").bind(function (e) {
+            el += e.getDeltaTime();
+            if (st === 0 && el > 1) { script.controller.demoStage = "universe"; api.applyDemoSetup(); st = 1; print("RULESHIFT SHOW opening"); }
+            else if (st === 1 && el > 11) { api.activate(); st = 2; print("RULESHIFT SHOW play"); }
+            else if (st === 2 && T.connections.some(function (c) { return c.rule === "REPEL"; }) && el > 11.8) { st = 3; print("RULESHIFT SHOW chain-flipped"); }
         });
     });
 }

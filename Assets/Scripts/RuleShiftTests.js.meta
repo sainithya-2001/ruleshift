@@ -33,6 +33,7 @@
     liveImaginePrompt: false
     runTests: false
     showCause: false
+    showUniverse: false
   ScriptTypesHidden:
     {}
   ReadMe: !<reference> 00000000-0000-0000-0000-000000000000
@@ -46,6 +47,7 @@
       runTests: false
       liveImagine: false
       showCause: false
+      showUniverse: false
       liveImaginePrompt: a glowing jellyfish
   ScriptTypes:
     -

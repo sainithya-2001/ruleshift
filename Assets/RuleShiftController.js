@@ -5,6 +5,10 @@
 // @input bool demoPreset = false
 // @input string demoStage = ""
 // @input bool lightFx = false
+// @input Asset.ObjectPrefab islandModel
+// @input Asset.ObjectPrefab creatureModel
+// @input Asset.ObjectPrefab coreModel
+// @input Asset.ObjectPrefab treeModel
 // @input Component.Camera camera
 // @input Asset.Material imagineMaterial
 
@@ -696,7 +700,9 @@ function labelExtent(c) {   // half-size and centre offset of the label text in 
     if (!(w > 0) || !(h > 0)) { return null; }
     return { hw: w / 2, hh: h / 2, ox: (bb.left + bb.right) / 2 * sc, oy: (bb.top + bb.bottom) / 2 * sc };
 }
-var placedLabels = [];   // this frame's already-placed label rectangles (screen/angular space), so labels never sit on each other either
+var placedLabels = [];
+var testPill = null, pillRect = null;   // the Delete pill in screen/angular space {x, y, hw, hh}, pushed by the toolbar script while it is shown
+script.api.setPillRect = function (r) { pillRect = r; };   // this frame's already-placed label rectangles (screen/angular space), so labels never sit on each other either
 function labelHitsNode(p, e, self) {   // compare in screen (angular) space: label rectangle vs each node's disc and vs the other labels
     var dep = Math.max(-p.z, 1), lx = (p.x + e.ox) / dep, ly = (p.y + e.oy) / dep, hw = e.hw / dep, hh = e.hh / dep;
     for (var i = 0; i < nodes.length; i++) {
@@ -704,6 +710,8 @@ function labelHitsNode(p, e, self) {   // compare in screen (angular) space: lab
         var dx = Math.max(Math.abs(lx - n.pos.x / nd) - hw, 0), dy = Math.max(Math.abs(ly - n.pos.y / nd) - hh, 0);
         if (dx * dx + dy * dy < nr * nr) { return true; }
     }
+    var pills = [pillRect, testPill];
+    for (var pi2 = 0; pi2 < 2; pi2++) { var pr = pills[pi2]; if (pr && Math.abs(lx - pr.x) < hw + pr.hw && Math.abs(ly - pr.y) < hh + pr.hh) { return true; } }
     for (var j = 0; j < placedLabels.length; j++) {
         var r = placedLabels[j];
         if (r.c !== self && Math.abs(lx - r.x) < hw + r.hw && Math.abs(ly - r.y) < hh + r.hh) { return true; }
@@ -806,8 +814,27 @@ function loadChain() {
     pendingPlace = null;   // everything is already placed: no placement hint
     print("RULESHIFT demo stage: chain");
 }
+// demoStage "universe": island (heavy, 1.5x), creature (light, 0.7x), core and tree at base size 12 cm, from saved models.
+// Links: creature-core ATTRACT (the creature follows the core), core-tree COLLISION TRIGGER (the tree reacts), creature-island ATTRACT.
+// Core and tree meet on Play, the collision flips the links at the core (creature-core becomes REPEL) and the creature drifts to the island.
+function loadUniverse() {
+    clearAll();
+    var base = 12;
+    var island = spawnModelNode(script.islandModel, "Island", base * 1.5, "heavy", new vec3(-0.3, 7.7, WORLD_Z), NODE_COLORS[2]);
+    var creature = spawnModelNode(script.creatureModel, "Creature", base * 0.7, "light", new vec3(15.8, 3.2, WORLD_Z), NODE_COLORS[0]);
+    var core = spawnModelNode(script.coreModel, "Core", base, null, new vec3(-11.4, -11.7, WORLD_Z), NODE_COLORS[1]);
+    var tree = spawnModelNode(script.treeModel, "Tree", base, null, new vec3(6.5, -9.9, WORLD_Z), NODE_COLORS[0]);
+    if (island && creature && core && tree) {
+        activateLink(slotFor(core, tree, true), RULES.COLLISION_TRIGGER, true);   // first, so its label gets the spot nearest its link
+        activateLink(slotFor(creature, core, true), RULES.ATTRACT, true);
+        activateLink(slotFor(creature, island, true), RULES.ATTRACT, true);
+    }
+    pendingPlace = null;
+    print("RULESHIFT demo stage: universe");
+}
+script.api.loadUniverse = loadUniverse;
 function applyDemoSetup() {
-    if (script.demoStage === "chain") { loadChain(); } else { clearAll(); pendingPlace = null; }
+    if (script.demoStage === "chain") { loadChain(); } else if (script.demoStage === "universe") { loadUniverse(); } else { clearAll(); pendingPlace = null; }
 }
 script.api.loadChain = loadChain;
 script.api.applyDemoSetup = applyDemoSetup;
@@ -862,6 +889,8 @@ script.api.makeSwatch = function (parent, col, size, z) {
 };
 var frameCount = 0;
 script.api.test = {
+    pillRect: function () { return pillRect; },
+    setTestPill: function (r) { testPill = r; },
     setFixedStep: function (s) { fixedStep = s; },   // read/write hooks for RuleShiftTests.js
     nodes: nodes, connections: connections, slots: slots,
     tap: function (i) { handleTapNode(nodes[i]); },
@@ -1086,14 +1115,23 @@ function failJob(job, reason) {
     var n = job.n; if (nodeIndex(n) >= 0) { setNodeColor(n, n.color); n.tr.setLocalScale(n.baseScale); }
     print("RULESHIFT imagine FAILED '" + job.prompt + "' (" + reason + ") after " + (elapsed - job.t0).toFixed(1) + "s - keeping the orb");
 }
+function restyleSaved(root) {   // a saved prefab keeps its imported (translucent) materials: give every mesh the same opaque material a generated model gets, keeping its texture
+    var meshes = []; collectMeshes(root, meshes);
+    meshes.forEach(function (v) {
+        var old = v.mainMaterial, nm = imagineMaterial();
+        try { var tex = old.mainPass.baseColorTexture || old.mainPass.baseTex; if (tex) { nm.mainPass.baseTex = tex; } } catch (e) { }
+        v.mainMaterial = nm;
+    });
+}
 function swapInModel(job, gltf) {
     var n = job.n;
     var holder = global.scene.createSceneObject("Imagined Model");
     holder.setParent(n.obj);
     holder.getTransform().setLocalPosition(vec3.zero());
     holder.getTransform().setLocalScale(vec3.one());
-    var model = gltf.tryInstantiate(holder, imagineMaterial());
+    var model = gltf.tryInstantiate ? gltf.tryInstantiate(holder, imagineMaterial()) : gltf.instantiate(holder);   // a live glTF asset (Snap3D) or a saved model (ObjectPrefab)
     if (!model) { holder.destroy(); throw new Error("tryInstantiate returned null"); }
+    if (!gltf.tryInstantiate) { restyleSaved(holder); }
     setLayerRec(holder, n.obj.layer);
     n.baseScale = vec3.one().uniformScale(n.size); n.radius = n.size * 0.5;   // the placeholder was still growing: the model gets the full hero size
     n.tr.setLocalScale(n.baseScale);                       // measure at the node's resting scale
@@ -1184,6 +1222,15 @@ function updateImagine(dt) {
         }
         if (job.state !== "pending" && !job.cap) { imagineJobs.splice(i, 1); }
     }
+}
+// Saved models (imported .glb prefabs) become normal nodes instantly: the same swap-in as a generated model, no generator or wait.
+function spawnModelNode(asset, name, size, weight, pos, fallbackColor) {
+    var n = spawnNode({ shape: "sphere", color: fallbackColor, size: size, weight: weight, pos: pos, name: name });
+    if (!n) { return null; }
+    if (!asset) { print("RULESHIFT model missing for " + name + " - keeping the orb"); return n; }
+    try { swapInModel({ n: n, prompt: name, t0: elapsed, state: "pending", cap: null }, asset); }
+    catch (e) { print("RULESHIFT model swap failed for " + name + ": " + e); }
+    return n;
 }
 script.api.captionY = captionY;
 script.api.captionCount = function () { return imagineJobs.filter(function (j) { return !!j.cap; }).length; };

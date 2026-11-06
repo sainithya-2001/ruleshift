@@ -1130,6 +1130,8 @@
   ScriptInputsDefault:
     strength: true
     demoPreset: true
+    demoStage: true
+    lightFx: true
   ScriptTypesDefault:
     {}
   ScriptInputs:
@@ -1139,6 +1141,12 @@
       strength: 0.800000
       debugAutoToggle: false
       demoPreset: false
+      demoStage: ""
+      lightFx: false
+      islandModel: !<reference.ObjectPrefab> f45f7968-3c3a-4a75-b24d-0e3c7fd71ee0
+      creatureModel: !<reference.ObjectPrefab> f0488228-7df6-4e15-a270-e3fbf702dcbb
+      coreModel: !<reference.ObjectPrefab> 74732071-06f5-4f1a-a4fc-6be3b95ded7c
+      treeModel: !<reference.ObjectPrefab> e1750a68-0d32-44b5-804f-4ec57e349b10
       camera: !<reference.Camera> 00000000-0000-0065-0000-000000000065
       imagineMaterial: !<reference.Material> 8eebcd57-3582-41fe-9642-3f25700777e8
   ScriptTypes:
@@ -2658,6 +2666,8 @@
   ScriptInputsDefault:
     runTests: true
     liveImagine: true
+    showCause: true
+    showUniverse: true
   ScriptTypesDefault:
     {}
   ScriptInputs:
@@ -2665,6 +2675,8 @@
       controller: !<reference.ScriptComponent> 4aef1a10-019c-4696-a7b1-b4bd90edb0eb
       runTests: false
       liveImagine: false
+      showCause: false
+      showUniverse: false
       liveImaginePrompt: a floating paper lantern
   ScriptTypes:
     "":
