@@ -5,6 +5,8 @@
 // @input bool showUniverse = false
 // @input bool showEditor = false
 // @input bool showGrow = false
+// @input bool showShots = false
+// @input bool shotsPulses = false
 // @input string liveImaginePrompt = "a floating paper lantern"
 
 // Self-driving test harness for RULESHIFT. Set runTests=true, run Preview, read the RULESHIFT TEST lines.
@@ -999,6 +1001,67 @@ if (script.showGrow) {
                 st = 1;
             } else if (st === 1 && el > 3) { api.activate(); st = 2; }
             else if (st === 2 && el > 5) { print("RULESHIFT SHOWGROW mid-chain grow=" + T.nodes[1].growK.toFixed(2) + " ct fires=" + T.fires(T.connections[1]) + " pulses=" + T.cause.active() + " link2=" + T.connections[2].rule); st = 3; }
+        });
+    });
+}
+
+// Screenshot tour (not a test): runs the scenes for the Devpost screenshots in order, printing "RULESHIFT SHOT <n> <name>" when each is ready; the capture is taken from outside.
+if (script.showShots) {
+    script.createEvent("OnStartEvent").bind(function () {
+        var api = script.controller.api, T = api.test, z = -95, step = 0, since = 0, sub = 0;
+        function mk(x, y, col) { var i = api.spawn({ shape: "sphere", sizeKey: "M", color: col, bounce: "low", weight: "light" }); T.place(i, new vec3(x, y, z)); T.nodes[i].initial = new vec3(x, y, z); return i; }
+        function shot(n, name) { print("RULESHIFT SHOT " + n + " " + name); }
+        function link(a, b) { return T.connections.filter(function (c) { return c.active && ((c.A.obj.name === a && c.B.obj.name === b) || (c.A.obj.name === b && c.B.obj.name === a)); })[0]; }
+        var steps = [
+            [2, function () { api.clearAll(); shot(1, "empty-stage"); }],
+            [14, function () { T.togglePalette(true); shot(2, "palette-open"); }],
+            [14, function () { T.togglePalette(false); api.clearAll(); api.setGenerator(function () { }); api.imagine("a floating paper lantern"); shot(3, "imagining"); }],
+            [14, function () { api.setGenerator(null); api.clearAll(); script.controller.demoStage = "universe"; api.applyDemoSetup(); shot(4, "universe-before"); }],
+            [14, function () { api.activate(); }],
+            [9, function () { shot(5, "universe-chase"); }],
+            [14, function () { T.cause.setTime(6); T.pressStart(2); sub = 0; }],
+            [0.35, function () {   // glide the lantern up the right edge into the flower
+                var ys = [-10, -5, -1, 2, 4], n = T.nodes[2];
+                if (sub < ys.length) { n.tr.setLocalPosition(new vec3(17, ys[sub], z)); sub++; step--; return; }
+                T.pressEnd(2, true);
+            }],
+            [3.5, function () { shot(6, "universe-chain"); }],
+            [30, function () { T.cause.setTime(0.5); }],
+            [2, function () { shot(7, "universe-after"); }],
+            [14, function () { api.reset(); api.clearAll(); api.loadDemo(); }],
+            [2, function () { api.activate(); }],
+            [3, function () { T.openEditor(T.connections[0]); }],
+            [3, function () { shot(8, "rule-editor"); }],
+            [14, function () { T.closeEditor(); api.clearAll(); T.cause.setTime(6); mk(-5, -8, [1, 0, 0.35]); mk(5, -8, [0, 0.85, 1]); mk(15.4, -8, [1, 0.9, 0]); mk(10, 5, [0.65, 0.3, 1]); T.connect(0, 1, "GROW"); T.connect(1, 2, "COLLISION_TRIGGER"); T.connect(2, 3, "ATTRACT"); }],
+            [2, function () { api.activate(); }],
+            [2, function () { shot(9, "grow-chain"); }],
+            [14, function () { T.cause.setTime(0.5); api.clearAll(); mk(-7, -6, [1, 0, 0.35]); mk(7, -6, [0, 0.85, 1]); api.activate(); T.nodes[0].vel = new vec3(20, 0, 0); }],
+            [2, function () { T.toggleCard(); }],
+            [3, function () { shot(10, "discoveries"); }],
+            [14, function () { api.clearAll(); T.toggleCard(); print("RULESHIFT SHOT done"); }]
+        ];
+        var waitPulse = null;   // retake mode: print the shot as soon as a cause pulse is travelling
+        if (script.shotsPulses) {
+            steps = [
+                [2, function () { api.clearAll(); script.controller.demoStage = "universe"; api.applyDemoSetup(); }],
+                [2, function () { api.activate(); }],
+                [22, function () { T.cause.setTime(12); T.pressStart(2); sub = 0; }],
+                [0.35, function () {
+                    var ys = [-10, -5, -1, 2, 4], n = T.nodes[2];
+                    if (sub < ys.length) { n.tr.setLocalPosition(new vec3(17, ys[sub], z)); sub++; step--; return; }
+                    T.pressEnd(2, true); waitPulse = [6, "universe-chain"];
+                }],
+                [40, function () { T.cause.setTime(0.5); api.clearAll(); }],
+                [2, function () { T.cause.setTime(12); mk(-5, -8, [1, 0, 0.35]); mk(5, -8, [0, 0.85, 1]); mk(15.4, -8, [1, 0.9, 0]); mk(10, 5, [0.65, 0.3, 1]); T.connect(0, 1, "GROW"); T.connect(1, 2, "COLLISION_TRIGGER"); T.connect(2, 3, "ATTRACT"); }],
+                [2, function () { api.activate(); waitPulse = [9, "grow-chain"]; }],
+                [40, function () { T.cause.setTime(0.5); api.clearAll(); print("RULESHIFT SHOT done"); }]
+            ];
+        }
+        script.createEvent("UpdateEvent").bind(function (e) {
+            if (waitPulse && T.cause.active() > 0) { shot(waitPulse[0], waitPulse[1]); waitPulse = null; }
+            since += e.getDeltaTime();
+            if (step >= steps.length) { return; }
+            if (since >= steps[step][0]) { var f = steps[step][1]; since = 0; step++; f(); }
         });
     });
 }

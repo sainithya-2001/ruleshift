@@ -611,6 +611,7 @@ export class RuleShiftControls extends BaseScriptComponent {
     api.test.editorPills = () => this.editorRows.map((row) => ({rule: row.rule, selected: row.border.enabled, fill: this.fillColor(row)}))
     api.test.pressEditorPill = (i: number) => this.controller.api.applyEditorRule(this.editorRows[i].rule)
     api.test.editorShown = () => this.editorShown
+    api.test.togglePalette = (on: boolean) => this.setPalette(on)
   }
 
   private fillColor(row: {fill: SceneObject}): number[] {
