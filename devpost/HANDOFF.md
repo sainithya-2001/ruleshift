@@ -1,3 +1,15 @@
+# Status (updated after Step 3)
+
+Built since the original handoff: Transfer and Grow rules (5 rules total); contextual rule editor (tap a link, panel of 5 coloured pills beside it, applies live); Discoveries card (5 system-event goals, sparkle + caption, persists until Clear); universe preset (saved Snap3D models in `Assets/RULESHIFT Models/`, hand-triggered chain: lantern starts far, cat chases ~10 cm, drag lantern into flower to fire the chain); placement-hint fix; sim-clock test mode (`fixedStep`, 0.1 s per frame, set by the harness).
+
+Tests: 290/290 PASS on the sim clock (`runTests` on the RULESHIFT Tests object, read the `RULESHIFT TEST SUMMARY` log line, turn it off after). Workflow: tests pass before each commit; commit and push per step.
+
+Limits to state honestly: tested in Lens Studio Preview only (no Spectacles hardware); voice is device-only (Preview has no mic ASR); real taps on the editor pills and Discoveries card are untested (tests call the same functions); the universe layout is cramped.
+
+Still-valid rules from the original handoff follow.
+
+---
+
 Read devpost/HANDOFF.md and devpost/design-brief.md. Follow section 12 rules strictly. Be terse. Never read Scene.scene or Cache files in full.
 
 
