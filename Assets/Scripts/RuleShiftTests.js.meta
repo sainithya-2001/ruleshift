@@ -32,9 +32,11 @@
     liveImagine: false
     liveImaginePrompt: false
     runTests: false
+    shotsPulses: false
     showCause: false
     showEditor: false
     showGrow: false
+    showShots: false
     showUniverse: false
   ScriptTypesHidden:
     {}
@@ -52,6 +54,8 @@
       showUniverse: false
       showEditor: false
       showGrow: false
+      showShots: false
+      shotsPulses: false
       liveImaginePrompt: a glowing jellyfish
   ScriptTypes:
     -
