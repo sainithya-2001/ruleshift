@@ -15,13 +15,19 @@
 // RULESHIFT system: a dynamic set of nodes (max MAX_NODES) + links {A,B,rule,visual}.
 // Nodes are spawned from the Create palette (or the demo preset). Each frame every active link adds a force to
 // both of its nodes; forces are summed per node, scaled by the node's weight, then integrated. Rules change live.
-var RULES = { ATTRACT: "ATTRACT", REPEL: "REPEL", COLLISION_TRIGGER: "COLLISION_TRIGGER" };
-var RULE_ORDER = [RULES.ATTRACT, RULES.REPEL, RULES.COLLISION_TRIGGER];
+var RULES = { ATTRACT: "ATTRACT", REPEL: "REPEL", COLLISION_TRIGGER: "COLLISION_TRIGGER", TRANSFER: "TRANSFER", GROW: "GROW" };
+var RULE_ORDER = [RULES.ATTRACT, RULES.REPEL, RULES.COLLISION_TRIGGER];   // the quick-cycle order (tests, debug auto-toggle)
+var ALL_RULES = [RULES.ATTRACT, RULES.REPEL, RULES.COLLISION_TRIGGER, RULES.TRANSFER, RULES.GROW];   // the order of the rule editor pills
+var TOUCH_RULES = {}; TOUCH_RULES[RULES.COLLISION_TRIGGER] = true; TOUCH_RULES[RULES.TRANSFER] = true; TOUCH_RULES[RULES.GROW] = true;   // rules that fire when the two objects touch
 var RULE_COLOR = {
     ATTRACT: new vec4(1.0, 0.55, 0.15, 1),  // warm
     REPEL: new vec4(0.2, 0.6, 1.0, 1),      // cool
-    COLLISION_TRIGGER: new vec4(0.8, 0.3, 1.0, 1) // violet
+    COLLISION_TRIGGER: new vec4(0.8, 0.3, 1.0, 1), // violet
+    TRANSFER: new vec4(0.2, 0.9, 0.35, 1),  // green
+    GROW: new vec4(1.0, 0.72, 0.9, 1)       // pink-white
 };
+var TRANSFER_KEEP = 0.1, TRANSFER_MIN_SPEED = 0.3;   // the slower object receives 90% of the faster one's velocity
+var GROW_STEP = 1.15, GROW_CAP = 2;
 var NODE_COLORS = [new vec4(1.0, 0.0, 0.35, 1), new vec4(0.0, 0.85, 1.0, 1), new vec4(1.0, 0.9, 0.0, 1)]; // hot pink, electric cyan, vivid yellow
 var MAX_NODES = 8;
 var WORLD_Z = -95;
@@ -216,7 +222,7 @@ function spawnNode(opts) {
     var col2 = obj.getComponent("Component.ColliderComponent");
     if (col2 && col2.shape && col2.shape.radius !== undefined) { var sh = col2.shape; sh.radius = 0.5; col2.shape = sh; }
     var n = { obj: obj, tr: tr, pos: new vec3(p.x, p.y, p.z), vel: vec3.zero(), force: vec3.zero(), initial: new vec3(p.x, p.y, p.z),
-        radius: radius, baseScale: scale, pulse: -1, dragging: false, color: col, rmv: rmv, parts: partList, fullMesh: getShapeMesh(shape), shape: shape, size: size,
+        radius: radius, baseScale: scale, growK: 1, pulse: -1, dragging: false, color: col, rmv: rmv, parts: partList, fullMesh: getShapeMesh(shape), shape: shape, size: size,
         accel: opts.accel !== undefined ? opts.accel : (WEIGHTS[opts.weight] || 1),
         rest: opts.rest !== undefined ? opts.rest : (BOUNCES[opts.bounce] || 0), glowOn: !!opts.glow, glow: [] };
     setNodeColor(n, col);
@@ -465,19 +471,37 @@ function computeForces() {
 
 var REARM_GAP = 1.5, PULSE_TIME = 0.5, PULSE_AMOUNT = 0.9;
 function flip(rule) { return rule === RULES.ATTRACT ? RULES.REPEL : (rule === RULES.REPEL ? RULES.ATTRACT : rule); }
+function touchEdge(c) {   // edge-triggered: true once when the pair starts touching, re-armed only after they separate by REARM_GAP
+    var dd = c.A.pos.distance(c.B.pos), touchD = c.A.radius + c.B.radius;
+    if (c.touching) { if (dd > touchD + REARM_GAP) { c.touching = false; } return false; }
+    if (dd > touchD + 0.1) { return false; }
+    c.touching = true; c.fires = (c.fires || 0) + 1;
+    return true;
+}
+function applyGrow(n) {   // size follows growK: visual scale, collision radius and the physics collider (node-local units) all scale together
+    n.baseScale = vec3.one().uniformScale(n.size * n.growK); n.radius = n.size * 0.5 * n.growK;
+    n.tr.setLocalScale(n.baseScale);
+}
+function growNode(n) { n.growK = Math.min(GROW_CAP, n.growK * GROW_STEP); applyGrow(n); }
+function transferVelocity(A, B) {   // Newton's cradle: the faster object hands most of its velocity to the slower one
+    var fast = A.vel.length >= B.vel.length ? A : B, slow = fast === A ? B : A;
+    var vf = fast.vel, vs = slow.vel;
+    if (vf.length < TRANSFER_MIN_SPEED) { return false; }
+    fast.vel = vf.uniformScale(TRANSFER_KEEP).add(vs.uniformScale(1 - TRANSFER_KEEP));
+    slow.vel = vs.uniformScale(TRANSFER_KEEP).add(vf.uniformScale(1 - TRANSFER_KEEP));
+    return true;
+}
 function checkCollisions() {
     connections.slice().forEach(function (c) {
-        if (c.rule !== RULES.COLLISION_TRIGGER) { c.touching = false; return; }
+        if (!TOUCH_RULES[c.rule]) { c.touching = false; return; }
         var A = c.A, B = c.B;
-        // edge-triggered: fires once when the pair starts touching, re-arms only after they separate by REARM_GAP
-        var dd = A.pos.distance(B.pos), touchD = A.radius + B.radius;
-        if (c.touching) { if (dd > touchD + REARM_GAP) { c.touching = false; } return; }
-        if (dd > touchD + 0.1) { return; }
-        c.touching = true; c.fires = (c.fires || 0) + 1;
+        if (!touchEdge(c)) { return; }
         A.pulse = 0; B.pulse = 0;
+        if (c.rule === RULES.TRANSFER) { var moved = transferVelocity(A, B); print("RULESHIFT TRANSFER " + A.obj.name + "-" + B.obj.name + (moved ? "" : " (no motion)")); return; }
+        if (c.rule === RULES.GROW) { growNode(A); growNode(B); print("RULESHIFT GROW " + A.obj.name + "-" + B.obj.name + " -> x" + A.growK.toFixed(2) + ", x" + B.growK.toFixed(2)); return; }
         print("RULESHIFT COLLISION " + A.obj.name + "-" + B.obj.name);
         connections.forEach(function (o) {
-            if (o === c || o.rule === RULES.COLLISION_TRIGGER) { return; }
+            if (o === c || TOUCH_RULES[o.rule] || flip(o.rule) === o.rule) { return; }
             if (o.A === A || o.A === B || o.B === A || o.B === B) {
                 // cause precedes effect: a pulse travels from the collision point along the link, and the rule flips only when it arrives
                 var shared = (o.A === A || o.A === B) ? o.A : o.B, far = shared === o.A ? o.B : o.A;
@@ -691,7 +715,7 @@ function resolveOverlaps(moveDragged) {   // moveDragged: last resort when the o
 }
 var UP = new vec3(0, 1, 0);
 var POP_TIME = 0.4, lastDt = 0.016;
-var LABEL_TEXT = { ATTRACT: "ATTRACT", REPEL: "REPEL", COLLISION_TRIGGER: "ON COLLISION" };
+var LABEL_TEXT = { ATTRACT: "ATTRACT", REPEL: "REPEL", COLLISION_TRIGGER: "ON COLLISION", TRANSFER: "TRANSFER", GROW: "GROW" };
 var labelAlpha = 1;   // labels stay fully opaque in every mode
 var LABEL_NUDGE_STEP = 0.8, LABEL_NUDGE_MAX = 40, LABEL_MAX_X = 15;
 function labelExtent(c) {   // half-size and centre offset of the label text in world cm (the camera sits at the origin, so depth = -z)
@@ -774,7 +798,8 @@ function resetWorld() {   // restores positions; created objects and links are k
     nodes.forEach(function (n) {
         n.pos = new vec3(n.initial.x, n.initial.y, n.initial.z);
         n.vel = vec3.zero(); n.force = vec3.zero(); n.pulse = -1; n.dragging = false;
-        n.tr.setLocalPosition(n.pos); n.tr.setLocalScale(n.baseScale);
+        n.growK = 1; applyGrow(n);
+        n.tr.setLocalPosition(n.pos);
     });
     clearCause();
     connections.forEach(function (c) { c.cooldownUntil = 0; c.touching = false; updateVisual(c); });
@@ -898,6 +923,7 @@ script.api.test = {
     tap: function (i) { handleTapNode(nodes[i]); },
     pressStart: function (i) { pressStartNode(nodes[i]); },
     pressEnd: function (i, allowTap) { pressEndNode(nodes[i], allowTap); },
+    growNode: growNode, applyGrow: applyGrow, GROW_CAP: GROW_CAP,
     clearLinks: clearLinks, selected: function () { return selNode ? nodeIndex(selNode) : -1; }, setRule: setRule, cycleRule: cycleRule,
     pendingBinds: function () { return pendingBinds.length; },
     cause: {
@@ -1135,8 +1161,7 @@ function swapInModel(job, gltf) {
     if (!model) { holder.destroy(); throw new Error("tryInstantiate returned null"); }
     if (!gltf.tryInstantiate) { restyleSaved(holder); }
     setLayerRec(holder, n.obj.layer);
-    n.baseScale = vec3.one().uniformScale(n.size); n.radius = n.size * 0.5;   // the placeholder was still growing: the model gets the full hero size
-    n.tr.setLocalScale(n.baseScale);                       // measure at the node's resting scale
+    var gk = n.growK; n.growK = 1; applyGrow(n);           // the placeholder was still growing: the model gets the full hero size; measure at the resting (ungrown) scale
     var b = worldBounds(holder);
     if (!b || b.radius < 1e-5) { holder.destroy(); throw new Error("model has no geometry"); }
     // fit: scale the model so its bounding sphere matches the orb footprint, and centre it on the node
@@ -1148,7 +1173,7 @@ function swapInModel(job, gltf) {
     // collider sized from the fitted bounds (sphere radius is in node-local units)
     var col = n.obj.getComponent("Component.ColliderComponent");
     if (col && col.shape && col.shape.radius !== undefined) { var sh = col.shape; sh.radius = Math.max(0.3, Math.min(0.75, b2.radius / n.size)); col.shape = sh; }
-    n.radius = n.size * 0.5;
+    n.growK = gk; applyGrow(n);                            // a Grow rule may already have enlarged the node
     n.rmv.enabled = false;
     n.glow.forEach(function (o) { o.enabled = false; });
     if (n.shine) { n.shine.enabled = false; }   // the orb's specular blob must not linger on the model
@@ -1209,7 +1234,7 @@ function updateImagine(dt) {
         }
         if (job.state === "pending") {   // alive placeholder: slow growth, gentle pulse, seconds counter (growth/pulse yield to selection and collision pulses)
             var age = elapsed - job.t0, g = 1 - (1 - GROW_START) * Math.exp(-age / GROW_TAU);
-            n.baseScale = vec3.one().uniformScale(n.size * g); n.radius = n.size * 0.5 * g;
+            n.baseScale = vec3.one().uniformScale(n.size * g * n.growK); n.radius = n.size * 0.5 * g * n.growK;
             var k = 0.5 + 0.5 * Math.sin(age * 4);
             if (n.pulse < 0 && n !== selNode && !n.selShown) {
                 n.tr.setLocalScale(n.baseScale.uniformScale(0.96 + 0.08 * k));

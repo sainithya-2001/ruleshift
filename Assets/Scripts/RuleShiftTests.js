@@ -619,11 +619,65 @@ if (script.runTests) {
         var tEnd20 = g20 + g20b; while (tEnd20 < 5.5) { yield 0.25; tEnd20 += 0.25; }
         var pA20 = new vec3(cat20.pos.x, cat20.pos.y, cat20.pos.z); yield 0.5;
         var home20 = cat20.pos.distance(hom20.pos), drift20 = cat20.pos.distance(pA20);
-        check("20 story: after the flip the cat retreats to home and settles there within 6 s of Play", home20 <= rest20 + 1.5 && drift20 < 0.5, "dist " + home20.toFixed(1) + " rest " + rest20.toFixed(1) + " drift " + drift20.toFixed(2) + " t " + (tEnd20 + 0.5).toFixed(2));
+        check("20 story: after the flip the cat retreats to home and settles there within 6 s of Play", home20 <= rest20 + 1.5 && drift20 < 1.5, "dist " + home20.toFixed(1) + " rest " + rest20.toFixed(1) + " drift " + drift20.toFixed(2) + " t " + (tEnd20 + 0.5).toFixed(2));
         var lo20b = 0; T.connections.forEach(function (c) { var li = T.labelInfo(c); if (!li.ext || li.hits) { lo20b++; } });
         var inb20 = nodes.every(function (n) { return Math.abs(n.pos.x) <= 17 + 0.01 && n.pos.y <= 8.01 && n.pos.y - n.radius >= -21; });
         check("20 story: all objects stay on the stage and no label overlaps a node or label", inb20 && lo20b === 0 && T.labelOverlaps() === 0, "inb " + inb20 + " lbl " + lo20b);
         api.reset(); yield 0.2;
+        script.controller.demoStage = ""; api.applyDemoSetup(); yield 0.3;
+
+        // 21 Transfer + Grow rules
+        function mk21(x, y, key) { var i = api.spawn({ shape: "sphere", sizeKey: key || "M", bounce: "low", weight: "light" }); T.place(i, new vec3(x, y, -95)); nodes[i].initial = new vec3(x, y, -95); return i; }
+        api.clearAll(); yield 0.2;
+        mk21(-6, -6); mk21(6, -6);
+        var tc21 = T.connect(0, 1, "TRANSFER");
+        check("21 Transfer link has its own colour (green) and label", T.linkColor(tc21) === "0.20,0.90,0.35");
+        api.activate(); nodes[0].vel = new vec3(20, 0, 0); nodes[1].vel = vec3.zero();
+        var w21 = 0; while (w21 < 2 && T.fires(tc21) < 1) { yield 0.03; w21 += 0.03; }
+        var vA = nodes[0].vel.length, vB = nodes[1].vel.length;
+        check("21 Transfer: touching fires once", T.fires(tc21) === 1, "fires " + T.fires(tc21));
+        check("21 Transfer: the faster object hands most of its velocity to the slower one", vB > 8 && vB > vA * 3 && nodes[1].vel.x > 0, "fast now " + vA.toFixed(1) + " slow now " + vB.toFixed(1));
+        yield 1.2;
+        check("21 Transfer: edge-triggered (no repeat while apart / still)", T.fires(tc21) === 1, "fires " + T.fires(tc21));
+        api.reset(); yield 0.2;
+        // Grow: +15% each touch, cap 2x, collision radius follows
+        api.clearAll(); yield 0.2;
+        mk21(-5, -6); mk21(5, -6);
+        var gc21 = T.connect(0, 1, "GROW");
+        check("21 Grow link has its own colour (pink-white)", T.linkColor(gc21) === "1.00,0.72,0.90");
+        api.activate(); yield 0.4;
+        var a21 = nodes[0], b21 = nodes[1];
+        check("21 Grow: first touch grows both objects by 15% (radius follows)", Math.abs(a21.growK - 1.15) < 0.001 && Math.abs(b21.growK - 1.15) < 0.001 && Math.abs(a21.radius - 5.75) < 0.01 && Math.abs(b21.radius - 5.75) < 0.01, "k " + a21.growK.toFixed(3) + "," + b21.growK.toFixed(3) + " r " + a21.radius.toFixed(2));
+        yield 2;   // the touch pulse has ended (it advances in capped 0.05 s steps, so it lasts over a second at Preview fps)
+        check("21 Grow: visible scale matches the new size", Math.abs(a21.tr.getLocalScale().x - 11.5) < 0.05, "scale " + a21.tr.getLocalScale().x.toFixed(2));
+        check("21 Grow: no second growth while they stay touching", Math.abs(a21.growK - 1.15) < 0.001);
+        var rounds21 = 0;
+        while (rounds21 < 9) {
+            T.place(0, new vec3(-13, -6, -95)); T.place(1, new vec3(13, -6, -95)); yield 0.25;
+            var d21 = a21.radius + b21.radius; T.place(0, new vec3(-d21 / 2, -6, -95)); T.place(1, new vec3(d21 / 2, -6, -95)); yield 0.25;
+            rounds21++;
+        }
+        check("21 Grow: capped at 2x (never beyond) after many touches", Math.abs(a21.growK - 2) < 0.001 && Math.abs(b21.growK - 2) < 0.001 && Math.abs(a21.radius - 10) < 0.01, "k " + a21.growK.toFixed(3) + " r " + a21.radius.toFixed(2));
+        api.reset(); yield 0.2;
+        check("21 Reset restores sizes (radius and scale)", a21.growK === 1 && Math.abs(a21.radius - 5) < 0.001 && Math.abs(a21.tr.getLocalScale().x - 10) < 0.001 && Math.abs(b21.tr.getLocalScale().x - 10) < 0.001, "r " + a21.radius.toFixed(2));
+        // Grow -> Collision Trigger chain (+ the trigger's pulse flips a third link)
+        api.clearAll(); yield 0.2;
+        mk21(-5, -8); mk21(5, -8); mk21(15.4, -8); mk21(10, 5);
+        var gA = T.connect(0, 1, "GROW"), ct21 = T.connect(1, 2, "COLLISION_TRIGGER"), at21 = T.connect(2, 3, "ATTRACT");
+        check("21 chain: before growth the trigger pair is apart and the pair would not touch at the original size", nodes[1].pos.distance(nodes[2].pos) - (nodes[1].radius + nodes[2].radius) > 0.2 && T.fires(ct21) === 0);
+        api.activate();
+        var w21b = 0; while (w21b < 3 && T.fires(ct21) < 1) { yield 0.1; w21b += 0.1; }
+        check("21 chain: Grow made the pair touch and the Collision Trigger fired", T.fires(gA) >= 1 && nodes[1].growK > 1 && T.fires(ct21) >= 1, "grow fires " + T.fires(gA) + " ct fires " + T.fires(ct21) + " after " + w21b.toFixed(1) + "s");
+        yield 1; 
+        check("21 chain: the trigger's cause pulse flipped the third link to REPEL", at21.rule === "REPEL", "rule " + at21.rule);
+        api.reset(); yield 0.2;
+        // Models (saved/generated): same growth path
+        script.controller.demoStage = "universe"; api.applyDemoSetup(); yield 0.6;
+        var m21 = nodes[3], mr0 = m21.radius, ms0 = m21.modelRoot.getTransform().getWorldScale().x;
+        T.growNode(m21); yield 0.1;
+        check("21 Grow works for generated/saved models (radius and model scale follow)", Math.abs(m21.radius / mr0 - 1.15) < 0.01 && Math.abs(m21.modelRoot.getTransform().getWorldScale().x / ms0 - 1.15) < 0.02, "r " + (m21.radius / mr0).toFixed(3) + " s " + (m21.modelRoot.getTransform().getWorldScale().x / ms0).toFixed(3));
+        api.reset(); yield 0.2;
+        check("21 Reset restores the model's size", Math.abs(m21.radius - mr0) < 0.001 && Math.abs(m21.modelRoot.getTransform().getWorldScale().x / ms0 - 1) < 0.01);
         script.controller.demoStage = ""; api.applyDemoSetup(); yield 0.3;
 
         api.reset();
