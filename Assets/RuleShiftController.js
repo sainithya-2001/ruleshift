@@ -35,6 +35,7 @@ var SIZES = { S: 7, M: 10, L: 14 };            // node scale in cm (diameter of 
 var WEIGHTS = { light: 1.6, heavy: 0.5 };      // multiplies how strongly forces move the node
 var BOUNCES = { low: 0, high: 0.85 };          // restitution on collisions and walls
 
+var nodeSeq = 0;
 var nodes = [];      // {obj, tr, pos, vel, force, initial, radius, baseScale, pulse, dragging, color, rmv, accel, rest, shape}
 var slots = [];      // every link object ever made for a pair; only `active` ones are in `connections`
 var connections = [];
@@ -222,7 +223,7 @@ function spawnNode(opts) {
     var col2 = obj.getComponent("Component.ColliderComponent");
     if (col2 && col2.shape && col2.shape.radius !== undefined) { var sh = col2.shape; sh.radius = 0.5; col2.shape = sh; }
     var n = { obj: obj, tr: tr, pos: new vec3(p.x, p.y, p.z), vel: vec3.zero(), force: vec3.zero(), initial: new vec3(p.x, p.y, p.z),
-        radius: radius, baseScale: scale, growK: 1, pulse: -1, dragging: false, color: col, rmv: rmv, parts: partList, fullMesh: getShapeMesh(shape), shape: shape, size: size,
+        id: nodeSeq++, radius: radius, baseScale: scale, growK: 1, pulse: -1, dragging: false, color: col, rmv: rmv, parts: partList, fullMesh: getShapeMesh(shape), shape: shape, size: size,
         accel: opts.accel !== undefined ? opts.accel : (WEIGHTS[opts.weight] || 1),
         rest: opts.rest !== undefined ? opts.rest : (BOUNCES[opts.bounce] || 0), glowOn: !!opts.glow, glow: [] };
     setNodeColor(n, col);
@@ -230,7 +231,7 @@ function spawnNode(opts) {
     if (shape === "sphere" && opts.shine !== false) { addShine(n); }
     if (opts.glow) { addGlow(n); }
     pendingBinds.push({ kind: "node", n: n });
-    pendingPlace = n;
+    pendingPlace = opts.pos ? null : n;   // only an object without a position waits for a pinch; presets and explicit positions are already placed
     updateEmptyHint();
     print("RULESHIFT spawned " + obj.name + " (" + nodes.length + "/" + MAX_NODES + ")");
     return n;
@@ -441,6 +442,7 @@ function updateSelection() {
 }
 
 function cycleRule(c, why) {   // a manual edit: the rule changes at once and a short pulse crosses the link so it feels physical
+    if (why === "tap") { noteEdit(c); }
     setRule(c, RULE_ORDER[(RULE_ORDER.indexOf(c.rule) + 1) % RULE_ORDER.length], why);
     launchCause(c, "tap", c.A.pos.add(new vec3(0, 0, 0)), c.A, c.B, TAP_PULSE_TIME);
 }
@@ -486,7 +488,7 @@ function applyGrow(n) {   // size follows growK: visual scale, collision radius 
     n.baseScale = vec3.one().uniformScale(n.size * n.growK); n.radius = n.size * 0.5 * n.growK;
     n.tr.setLocalScale(n.baseScale);
 }
-function growNode(n) { n.growK = Math.min(GROW_CAP, n.growK * GROW_STEP); applyGrow(n); }
+function growNode(n) { n.growK = Math.min(GROW_CAP, n.growK * GROW_STEP); applyGrow(n); if (n.growK >= GROW_CAP - 1e-9) { discover("growth", n.obj.name + " at max size"); } }
 function transferVelocity(A, B) {   // Newton's cradle: the faster object hands most of its velocity to the slower one
     var fast = A.vel.length >= B.vel.length ? A : B, slow = fast === A ? B : A;
     var vf = fast.vel, vs = slow.vel;
@@ -501,7 +503,7 @@ function checkCollisions() {
         var A = c.A, B = c.B;
         if (!touchEdge(c)) { return; }
         A.pulse = 0; B.pulse = 0;
-        if (c.rule === RULES.TRANSFER) { var moved = transferVelocity(A, B); print("RULESHIFT TRANSFER " + A.obj.name + "-" + B.obj.name + (moved ? "" : " (no motion)")); return; }
+        if (c.rule === RULES.TRANSFER) { var moved = transferVelocity(A, B); if (moved) { discover("cradle", A.obj.name + "-" + B.obj.name); } print("RULESHIFT TRANSFER " + A.obj.name + "-" + B.obj.name + (moved ? "" : " (no motion)")); return; }
         if (c.rule === RULES.GROW) { growNode(A); growNode(B); print("RULESHIFT GROW " + A.obj.name + "-" + B.obj.name + " -> x" + A.growK.toFixed(2) + ", x" + B.growK.toFixed(2)); return; }
         print("RULESHIFT COLLISION " + A.obj.name + "-" + B.obj.name);
         connections.forEach(function (o) {
@@ -510,7 +512,7 @@ function checkCollisions() {
                 // cause precedes effect: a pulse travels from the collision point along the link, and the rule flips only when it arrives
                 var shared = (o.A === A || o.A === B) ? o.A : o.B, far = shared === o.A ? o.B : o.A;
                 var mid = A.pos.add(B.pos).uniformScale(0.5);
-                if (!launchCause(o, "flip", mid, shared, far, CAUSE_TIME)) { setRule(o, flip(o.rule), "collision"); o.flash = 0; }   // pool exhausted: flip at once rather than lose it
+                if (!launchCause(o, "flip", mid, shared, far, CAUSE_TIME)) { setRule(o, flip(o.rule), "collision"); o.flash = 0; discover("chain", "immediate flip"); }   // pool exhausted: flip at once rather than lose it
             }
         });
     });
@@ -580,7 +582,7 @@ function updateCause(dt) {
         positionCause(p, u);
         if (u >= 1) {   // arrival: only now does the rule change, and the link flashes
             var c = p.c;
-            if (p.mode === "flip" && flip(c.rule) !== c.rule) { setRule(c, flip(c.rule), "collision"); }
+            if (p.mode === "flip" && flip(c.rule) !== c.rule) { setRule(c, flip(c.rule), "collision"); discover("chain", "pulse flip " + c.A.obj.name + "-" + c.B.obj.name); }
             c.flash = 0; c.pop = 0;
             releaseCause(p);
         }
@@ -738,8 +740,8 @@ function labelHitsNode(p, e, self) {   // compare in screen (angular) space: lab
         var dx = Math.max(Math.abs(lx - n.pos.x / nd) - hw, 0), dy = Math.max(Math.abs(ly - n.pos.y / nd) - hh, 0);
         if (dx * dx + dy * dy < nr * nr) { return true; }
     }
-    var pills = [pillRect, testPill];
-    for (var pi2 = 0; pi2 < 2; pi2++) { var pr = pills[pi2]; if (pr && Math.abs(lx - pr.x) < hw + pr.hw && Math.abs(ly - pr.y) < hh + pr.hh) { return true; } }
+    var pills = [pillRect, testPill, cardRect];
+    for (var pi2 = 0; pi2 < 3; pi2++) { var pr = pills[pi2]; if (pr && Math.abs(lx - pr.x) < hw + pr.hw && Math.abs(ly - pr.y) < hh + pr.hh) { return true; } }
     for (var j = 0; j < placedLabels.length; j++) {
         var r = placedLabels[j];
         if (r.c !== self && Math.abs(lx - r.x) < hw + r.hw && Math.abs(ly - r.y) < hh + r.hh) { return true; }
@@ -790,6 +792,133 @@ function updateVisual(c) {
     }
 }
 
+// ---------- Discoveries: open goals detected from system events (never from specific objects) ----------
+var DISCOVERIES = [
+    { id: "contact", name: "First contact", hint: "Two objects collide on their own" },
+    { id: "chain", name: "Chain reaction", hint: "A collision flips another rule" },
+    { id: "growth", name: "Growth spurt", hint: "Grow an object to max size" },
+    { id: "cradle", name: "Newton's cradle", hint: "A Transfer hands off motion" },
+    { id: "rewrite", name: "Rewrite reality", hint: "Edit a rule live: something reverses" }
+];
+var discovered = {}, discoveryVer = 0, contacts = {}, pendingRewrite = null, CONTACT_APPROACH = 0.3;
+function discover(id, why) {
+    if (discovered[id]) { return; }
+    discovered[id] = true; discoveryVer++;
+    print("RULESHIFT DISCOVERED " + id + " (" + why + ")");
+    sparkleBurst();
+}
+function resetDiscoveries() { discovered = {}; contacts = {}; pendingRewrite = null; discoveryVer++; }
+// First contact: a pair that starts touching while the simulation runs, neither being dragged, and approaching each other (a drag shove or a Grow overlap is not a collision).
+function detectContacts() {
+    var now = {};
+    for (var i = 0; i < nodes.length; i++) {
+        for (var j = i + 1; j < nodes.length; j++) {
+            var A = nodes[i], B = nodes[j], d = B.pos.sub(A.pos), dist = d.length;
+            if (dist > A.radius + B.radius + 0.1) { continue; }
+            var key = A.id + "_" + B.id; now[key] = true;
+            if (contacts[key] || state !== "live" || A.dragging || B.dragging) { continue; }
+            var dir = dist > 0.001 ? d.uniformScale(1 / dist) : new vec3(1, 0, 0);
+            if (-B.vel.sub(A.vel).dot(dir) > CONTACT_APPROACH) { discover("contact", A.obj.name + "-" + B.obj.name); }
+        }
+    }
+    contacts = now;
+}
+// Rewrite reality: a rule edited by hand while the simulation runs, then a linked object reverses direction within 3 s.
+function noteEdit(c) {
+    if (state !== "live") { return; }
+    var items = [];
+    [c.A, c.B].forEach(function (n) { if (n.vel.length > 1) { items.push({ n: n, v: new vec3(n.vel.x, n.vel.y, n.vel.z) }); } });
+    pendingRewrite = items.length ? { items: items, age: 0 } : null;
+}
+function updateRewrite(dt) {
+    if (!pendingRewrite || state !== "live") { return; }
+    pendingRewrite.age += dt;
+    for (var i = 0; i < pendingRewrite.items.length; i++) {
+        var it = pendingRewrite.items[i];
+        if (nodeIndex(it.n) >= 0 && !it.n.dragging && it.n.vel.length > 0.8 && it.n.vel.dot(it.v) < 0) { discover("rewrite", it.n.obj.name + " reversed"); pendingRewrite = null; return; }
+    }
+    if (pendingRewrite.age > 3) { pendingRewrite = null; }
+}
+// sparkle: a burst of additive sparks where the "Discovered" caption appears
+var sparkPool = [], sparkActive = [], SPARK_COUNT = 14, SPARK_LIFE = 0.9;
+var SPARK_COLORS = [new vec4(1, 0.95, 0.6, 1), new vec4(1, 0.7, 0.9, 1), new vec4(0.7, 0.95, 1, 1)];
+function makeSpark() {
+    var o = global.scene.createSceneObject("Sparkle"), par = NODE_TMPL.getParent();
+    if (par) { o.setParent(par); }
+    o.layer = NODE_TMPL.layer; o.enabled = false;
+    var v = o.createComponent("Component.RenderMeshVisual");
+    v.mesh = SPHERE_MESH; v.mainMaterial = SPHERE_MAT.clone();
+    var ps = v.mainPass; ps.blendMode = BlendMode.Add; ps.depthWrite = false; ps.depthTest = false;
+    v.setRenderOrder(70);
+    var sp = { o: o, tr: o.getTransform(), pass: ps, age: 0, p: vec3.zero(), v: vec3.zero(), size: 1, col: SPARK_COLORS[0] };
+    sparkPool.push(sp);
+    return sp;
+}
+function sparkleBurst() {
+    var center = new vec3(0, captionY(script.api.captionCount()), WORLD_Z + 1);
+    for (var i = 0; i < SPARK_COUNT; i++) {
+        var sp = null;
+        for (var k = 0; k < sparkPool.length; k++) { if (sparkActive.indexOf(sparkPool[k]) < 0) { sp = sparkPool[k]; break; } }
+        if (!sp) { sp = makeSpark(); }
+        var a = i / SPARK_COUNT * Math.PI * 2 + (i % 2) * 0.3, sd = 7 + (i % 3) * 4;
+        sp.age = 0; sp.p = new vec3(center.x + (i % 5 - 2) * 4, center.y, center.z); sp.v = new vec3(Math.cos(a) * sd, Math.sin(a) * sd * 0.7 + 2, 0);
+        sp.size = 0.9 + (i % 3) * 0.5; sp.col = SPARK_COLORS[i % 3];
+        sp.o.enabled = true; sp.tr.setWorldPosition(sp.p);
+        sparkActive.push(sp);
+    }
+}
+function updateSparkles(dt) {
+    for (var i = sparkActive.length - 1; i >= 0; i--) {
+        var sp = sparkActive[i];
+        sp.age += dt;
+        if (sp.age >= SPARK_LIFE) { sp.o.enabled = false; sparkActive.splice(i, 1); continue; }
+        var k = sp.age / SPARK_LIFE, al = (1 - k) * (1 - k);
+        sp.p = sp.p.add(sp.v.uniformScale(dt)); sp.tr.setWorldPosition(sp.p);
+        sp.tr.setLocalScale(vec3.one().uniformScale(sp.size * (1 + 0.6 * k) / SPHERE_D));
+        sp.pass.baseColor = new vec4(sp.col.r * al, sp.col.g * al, sp.col.b * al, al);
+    }
+}
+// The card (TypeScript side draws it): collapsed by default in a top corner; expanded only where it fits clear of objects, labels and the Delete pill.
+var CARD = { d: 85, cw: 11, ch: 2.8, pad: 0.8, layouts: [] };
+// Expanded layouts, most generous first: the card takes the first one that fits somewhere clear of objects, labels, the Delete pill and the toolbar.
+[{ cols: 1, rows: 5, cellW: 14.5, rowH: 2.4, hints: true }, { cols: 1, rows: 5, cellW: 10.5, rowH: 1.7, hints: false }, { cols: 2, rows: 3, cellW: 10.5, rowH: 1.7, hints: false }, { cols: 5, rows: 1, cellW: 8.6, rowH: 1.7, hints: false }].forEach(function (L) {
+    L.w = L.cols * L.cellW + 2 * CARD.pad; L.h = CARD.ch + L.rows * L.rowH + CARD.pad; CARD.layouts.push(L);
+});
+var cardOpen = false, cardSuppressed = false, cardRect = null, cardCorner = -1;
+function updateCard() {
+    if (cardSuppressed) { cardRect = null; return; }
+    var v = script.api.view(), ob = editorObstacles(true, true), step = 1.5 / CARD.d;
+    function blocked(cx, cy, hw, hh) { return editorBlocked(cx, cy, hw, hh, ob, 0.8); }
+    function scan(w, h) {   // the free spot nearest the preferred top corner (then nearest the other one)
+        var hw = w / 2 / CARD.d, hh = h / 2 / CARD.d, best = null, bestC = 1e9, m = 1.0 / CARD.d;
+        for (var ci = 0; ci < 2; ci++) {
+            var side = ci === 0 ? cardCorner : -cardCorner, ax = side * (v.halfW / 95 - hw - m), ay = v.halfH / 95 - hh - m;
+            for (var gy = ay; gy >= toolbarTopAng + hh; gy -= step) {
+                for (var gx = ax; Math.abs(gx) <= v.halfW / 95 - hw; gx -= side * step) {
+                    var c = Math.hypot(gx - ax, gy - ay) + ci * 0.4;
+                    if (c < bestC && !blocked(gx, gy, hw, hh)) { best = { x: gx, y: gy, corner: side }; bestC = c; }
+                }
+            }
+        }
+        return best;
+    }
+    var r = null, li = -1;
+    if (cardOpen) { for (var k = 0; k < CARD.layouts.length && !r; k++) { r = scan(CARD.layouts[k].w, CARD.layouts[k].h); li = r ? k : -1; } }
+    if (!r) { r = scan(CARD.cw, CARD.ch); li = -1; }
+    if (r) {
+        cardCorner = r.corner;
+        var L = li >= 0 ? CARD.layouts[li] : null;
+        r.layout = li; r.expanded = !!L; r.w = L ? L.w : CARD.cw; r.h = L ? L.h : CARD.ch; r.hw = r.w / 2 / CARD.d; r.hh = r.h / 2 / CARD.d;
+    }
+    cardRect = r;
+}
+script.api.setCardOpen = function (b) { cardOpen = !!b; };
+script.api.setCardSuppressed = function (b) { cardSuppressed = !!b; if (b) { cardRect = null; } };
+script.api.cardInfo = function () { return cardRect ? { x: cardRect.x, y: cardRect.y, expanded: cardRect.expanded, layout: cardRect.layout, fits: !cardOpen || cardRect.expanded, corner: cardRect.corner, w: cardRect.w, h: cardRect.h } : null; };
+script.api.cardSpec = CARD;
+script.api.discoveries = function () { return DISCOVERIES.map(function (d) { return { id: d.id, name: d.name, hint: d.hint, done: !!discovered[d.id] }; }); };
+script.api.discoveryVersion = function () { return discoveryVer; };
+
 // ---------- Rule editor: tapping a link opens a panel of all five rules next to it ----------
 // The panel is drawn at EDITOR.d (nearer than the world, like the Delete pill) and placed in screen/angular space so it never covers
 // an object, a label, the Delete pill, the toolbar or the edge of the view; it is re-placed every frame, so it follows the link.
@@ -820,7 +949,7 @@ function toggleEditor(c) { if (editorLink === c) { closeEditor("link tapped agai
 function applyEditorRule(rule) {   // instant: the simulation keeps running, a short pulse crosses the link like any manual edit
     var c = editorLink;
     if (!c || !c.active || ALL_RULES.indexOf(rule) < 0) { return false; }
-    if (c.rule !== rule) { setRule(c, rule, "editor"); launchCause(c, "tap", c.A.pos, c.A, c.B, TAP_PULSE_TIME); }
+    if (c.rule !== rule) { noteEdit(c); setRule(c, rule, "editor"); launchCause(c, "tap", c.A.pos, c.A, c.B, TAP_PULSE_TIME); }
     closeEditor("applied " + rule);
     return true;
 }
@@ -831,11 +960,11 @@ function editorTouch(ax, ay) {   // a press at angular (ax, ay): outside the pan
     closeEditor("tap elsewhere");
     return true;
 }
-function editorObstacles(withNodes) {   // everything the panel must keep clear of, in angular space
+function editorObstacles(withNodes, skipCard) {   // everything the panel must keep clear of, in angular space
     var out = { discs: [], rects: [] };
     if (withNodes) { nodes.forEach(function (n) { var nd = Math.max(-n.pos.z, 1); out.discs.push({ x: n.pos.x / nd, y: n.pos.y / nd, r: n.radius / nd }); }); }
     placedLabels.forEach(function (r) { out.rects.push(r); });
-    [pillRect, testPill].forEach(function (r) { if (r) { out.rects.push(r); } });
+    [pillRect, testPill, skipCard ? null : cardRect].forEach(function (r) { if (r) { out.rects.push(r); } });
     return out;
 }
 function editorBlocked(cx, cy, hw, hh, ob, margin) {
@@ -914,7 +1043,7 @@ function resetWorld() {   // restores positions; created objects and links are k
         n.growK = 1; applyGrow(n);
         n.tr.setLocalPosition(n.pos);
     });
-    clearCause();
+    clearCause(); contacts = {}; pendingRewrite = null;
     connections.forEach(function (c) { c.cooldownUntil = 0; c.touching = false; updateVisual(c); });
     selNode = null;
     if (goalEnabled) { goalStage = 0; settleTime = 0; goalText.text = GOAL_1; nextText.text = "Next: " + GOAL_2; }
@@ -924,7 +1053,7 @@ function clearAll() {
     clearCause();
     for (var k = slots.length - 1; k >= 0; k--) { destroySlot(slots[k]); }
     for (var i = nodes.length - 1; i >= 0; i--) { nodes[i].obj.destroy(); }
-    nodes.length = 0; refreshConnections(); updateEmptyHint();
+    nodes.length = 0; refreshConnections(); updateEmptyHint(); resetDiscoveries();
     selNode = null; pendingPlace = null; setGoalEnabled(false);
     setState("creation");
     print("RULESHIFT cleared all");
@@ -958,12 +1087,14 @@ function loadChain() {
 // the collision sends a pulse down the lantern's link and flips cat-lantern to REPEL. Layout: the cat starts beside the house, the lantern drifts in from the
 // lower right through the flower; the cat is drawn toward the lantern (away from the house), then after the flip retreats to the house and settles.
 function loadUniverse() {
+    // A hand-triggered chain: the cat chases the lantern across the stage, nothing collides by itself, and dragging the lantern into the flower
+    // fires the Collision Trigger, which flips cat-lantern to REPEL so the cat is pushed back home. Home top-left, cat beside it, lantern bottom-right, flower top-right.
     clearAll();
     var base = 12;
-    var home = spawnModelNode(script.homeModel, "Home", base * 1.5, "heavy", new vec3(-13.7, 0.2, WORLD_Z), NODE_COLORS[2]);
-    var cat = spawnModelNode(script.catModel, "Cat", base * 0.7, "light", new vec3(0.4, 0.7, WORLD_Z), NODE_COLORS[0]);
-    var lantern = spawnModelNode(script.lanternModel, "Lantern", base, null, new vec3(17, -14.5, WORLD_Z), NODE_COLORS[1]);
-    var flower = spawnModelNode(script.flowerModel, "Flower", base, null, new vec3(11.8, -1.5, WORLD_Z), NODE_COLORS[0]);
+    var home = spawnModelNode(script.homeModel, "Home", base * 1.5, "heavy", new vec3(-14, 7, WORLD_Z), NODE_COLORS[2]);
+    var cat = spawnModelNode(script.catModel, "Cat", base * 0.7, "light", new vec3(0.2, 7.6, WORLD_Z), NODE_COLORS[0]);
+    var lantern = spawnModelNode(script.lanternModel, "Lantern", base * 0.85, "heavy", new vec3(17, -16, WORLD_Z), NODE_COLORS[1]);
+    var flower = spawnModelNode(script.flowerModel, "Flower", base, null, new vec3(16, 5.5, WORLD_Z), NODE_COLORS[0]);
     if (home && cat && lantern && flower) {
         activateLink(slotFor(lantern, flower, true), RULES.COLLISION_TRIGGER, true);   // first, so its label gets the spot nearest its link
         activateLink(slotFor(cat, lantern, true), RULES.ATTRACT, true);
@@ -1037,6 +1168,16 @@ script.api.test = {
     pressStart: function (i) { pressStartNode(nodes[i]); },
     pressEnd: function (i, allowTap) { pressEndNode(nodes[i], allowTap); },
     growNode: growNode, applyGrow: applyGrow, GROW_CAP: GROW_CAP,
+    discovered: function () { return DISCOVERIES.filter(function (d) { return discovered[d.id]; }).map(function (d) { return d.id; }); },
+    sparkleActive: function () { return sparkActive.length; },
+    cardOverlaps: function () {
+        if (!cardRect) { return -1; }
+        var ob = editorObstacles(true, true), r = cardRect, n = 0, v = script.api.view();
+        ob.discs.forEach(function (d) { var dx = Math.max(Math.abs(r.x - d.x) - r.hw, 0), dy = Math.max(Math.abs(r.y - d.y) - r.hh, 0); if (dx * dx + dy * dy < d.r * d.r) { n++; } });
+        ob.rects.forEach(function (o) { if (Math.abs(r.x - o.x) < r.hw + o.hw && Math.abs(r.y - o.y) < r.hh + o.hh) { n++; } });
+        if (Math.abs(r.x) + r.hw > v.halfW / 95 || r.y + r.hh > v.halfH / 95 || r.y - r.hh < toolbarTopAng) { n++; }
+        return n;
+    },
     openEditor: openEditor, closeEditor: function () { closeEditor("test"); }, editorTouch: editorTouch, toggleEditor: toggleEditor,
     editorOpen: function () { return editorLink ? slots.indexOf(editorLink) : -1; },
     editorRect: function () { return editorRect; },
@@ -1065,7 +1206,7 @@ script.api.test = {
     goalStage: function () { return goalStage; },
     frames: function () { return frameCount; },
     linkColor: function (c) { var k = c.rmv.mainPass.baseColor; return k.r.toFixed(2) + "," + k.g.toFixed(2) + "," + k.b.toFixed(2); },
-    place: function (i, v) { var n = nodes[i]; n.pos = new vec3(v.x, v.y, v.z); n.vel = vec3.zero(); n.tr.setLocalPosition(n.pos); },
+    place: function (i, v) { var n = nodes[i]; n.pos = new vec3(v.x, v.y, v.z); n.vel = vec3.zero(); n.tr.setLocalPosition(n.pos); if (pendingPlace === n) { pendingPlace = null; } },
     connect: function (i, j, rule) { var c = slotFor(nodes[i], nodes[j], true); if (!c.active) { activateLink(c, rule || RULES.ATTRACT, true); } return c; },
     labelInfo: function (c) { var e = labelExtent(c); var p = c.labelTr.getWorldPosition(); return { ext: e, nudge: c.labelNudge, y: p.y, hits: e ? labelHitsNode(p, e, c) : null }; },
     fires: function (c) { return c.fires || 0; },
@@ -1116,6 +1257,7 @@ script.createEvent("UpdateEvent").bind(function (e) {
             integrate(total / steps);
         }
     }
+    detectContacts();
     for (var it = 0; it < 6; it++) {   // push apart, then re-clamp so a shove can never leave the box
         resolveOverlaps(it >= 2);
         nodes.forEach(function (n) { if (!n.dragging || it >= 2) { n.pos = clampToBox(n, n.pos); n.tr.setLocalPosition(n.pos); } });
@@ -1123,6 +1265,7 @@ script.createEvent("UpdateEvent").bind(function (e) {
     if (state === "live") { checkCollisions(); }
     updatePulses(dt);
     updateCause(realDt);
+    updateRewrite(realDt); updateSparkles(realDt);
     updateImagine(dt);
     updateSelection();
     hintObj.enabled = !!pendingPlace && !goalEnabled;
@@ -1130,6 +1273,7 @@ script.createEvent("UpdateEvent").bind(function (e) {
     placedLabels.length = 0;
     connections.forEach(updateLabel);
     connections.forEach(updateVisual);
+    updateCard();
     updateEditor();
 });
 script.createEvent("OnStartEvent").bind(function () {

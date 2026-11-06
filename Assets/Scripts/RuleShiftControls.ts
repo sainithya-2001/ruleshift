@@ -82,6 +82,14 @@ export class RuleShiftControls extends BaseScriptComponent {
   private editorRows: {rule: string; pill: Pill; fill: SceneObject; border: SceneObject; color: number[]}[] = []
   private editorShown = false
   private editorTextFit = 0
+  private cardRoot: SceneObject
+  private cardPlates: SceneObject[] = []
+  private cardHeader: Pill
+  private cardRows: {name: Text; hint: Text; id: string}[] = []
+  private cardOpen = false
+  private cardShown = false
+  private cardSeen: {[id: string]: boolean} = {}
+  private cardVersion = -1
 
   onAwake() {
     const v = this.controller.api.view()
@@ -91,6 +99,7 @@ export class RuleShiftControls extends BaseScriptComponent {
     this.buildPalette()
     this.buildDelete()
     this.buildEditor()
+    this.buildCard()
 
     this.createEvent("OnStartEvent").bind(() => {
       this.controller.api.onState((st: string) => this.onState(st))
@@ -101,6 +110,7 @@ export class RuleShiftControls extends BaseScriptComponent {
     this.createEvent("UpdateEvent").bind(() => {
       this.updateFloating()
       this.updateEditor()
+      this.updateCard()
       this.updateLabelFit()
       if (this.listening) {
         // no timeout until the first partial arrives (10 s listening window), then 2 s of silence after the last partial
@@ -469,6 +479,115 @@ export class RuleShiftControls extends BaseScriptComponent {
     this.deletePlate.getTransform().setWorldPosition(new vec3(nearer.x, nearer.y, nearer.z - 0.6))
     // tell the controller where the pill is on screen so link labels keep clear of it (angular space: the pill is drawn at depth 70)
     if (api.setPillRect) api.setPillRect({x: nearer.x / 70, y: nearer.y / 70, hw: (8.2 / 2 + 0.6) / 70, hh: (3.4 / 2 + 0.4) / 70})
+  }
+
+  // ---- Discoveries: a small collapsible card in a top corner (placed by the controller so it never covers objects, labels or the toolbar) ----
+  private makeText(name: string, size: number, col: vec4, align: HorizontalAlignment): Text {
+    const so = global.scene.createSceneObject(name)
+    so.setParent(this.cardRoot)
+    const tx = so.createComponent("Component.Text") as Text
+    tx.size = size
+    tx.depthTest = false
+    tx.horizontalAlignment = align
+    tx.verticalAlignment = VerticalAlignment.Center
+    tx.horizontalOverflow = HorizontalOverflow.Overflow
+    tx.textFill.color = col
+    tx.renderOrder = 100
+    return tx
+  }
+
+  private buildCard() {
+    const api = this.controller.api
+    const C = api.cardSpec
+    this.cardRoot = global.scene.createSceneObject("Discoveries Card")
+    this.cardPlates.push(api.makePlate("Card Plate Collapsed", C.cw, C.ch, 0.4, new vec3(0, 0, Z), DARK, -8))
+    C.layouts.forEach((L: any, li: number) => this.cardPlates.push(api.makePlate("Card Plate " + li, L.w, L.h, 0.4, new vec3(0, 0, Z), DARK, -8)))
+    this.cardHeader = this.makePill(this.cardRoot, "CardHeader", "Discoveries 0/5", null, new vec3(0, 0, 0.5), new vec2(C.cw, C.ch), 38, true)
+    this.cardHeader.button.onInitialized.add(() => {
+      this.cardHeader.button.opacity = 0
+    })
+    this.cardHeader.button.onTriggerUp.add(() => {
+      this.cardOpen = !this.cardOpen
+      api.setCardOpen(this.cardOpen)
+    })
+    api.discoveries().forEach((d: any) => {
+      this.cardRows.push({
+        id: d.id,
+        name: this.makeText("CardName " + d.id, 36, new vec4(1, 1, 1, 1), HorizontalAlignment.Center),
+        hint: this.makeText("CardHint " + d.id, 22, new vec4(0.7, 0.78, 0.95, 1), HorizontalAlignment.Center),
+      })
+    })
+    this.setCardShown(false)
+    api.test.cardState = () => ({
+      shown: this.cardShown,
+      open: this.cardOpen,
+      header: (this.cardHeader.content as any).text,
+      rows: this.cardRows.map((r) => r.name.text),
+    })
+    api.test.toggleCard = () => {
+      this.cardOpen = !this.cardOpen
+      api.setCardOpen(this.cardOpen)
+    }
+  }
+
+  private setCardShown(on: boolean) {
+    this.cardShown = on
+    this.cardRoot.enabled = on
+    if (!on) this.cardPlates.forEach((p) => (p.enabled = false))
+    this.cardRows.forEach((r) => {
+      r.name.sceneObject.enabled = on && this.cardOpen
+      r.hint.sceneObject.enabled = on && this.cardOpen
+    })
+  }
+
+  private updateCard() {
+    const api = this.controller.api
+    // the Create band and the rule editor own the space; the card steps aside while they are open
+    api.setCardSuppressed(this.palette.enabled || this.editorShown)
+    const info = api.cardInfo()
+    if (!info) {
+      if (this.cardShown) this.setCardShown(false)
+      return
+    }
+    const C = api.cardSpec
+    const list = api.discoveries()
+    if (api.discoveryVersion() !== this.cardVersion) {
+      this.cardVersion = api.discoveryVersion()
+      list.forEach((d: any) => {
+        if (d.done && !this.cardSeen[d.id]) {
+          this.showCaption("Discovered: " + d.name + " ✨", 4)
+        }
+        this.cardSeen[d.id] = d.done
+      })
+    }
+    const n = list.filter((d: any) => d.done).length
+    ;(this.cardHeader.content as any).text = "Discoveries " + n + "/" + list.length
+    const expanded = this.cardOpen && info.expanded
+    this.cardShown = true
+    this.cardRoot.enabled = true
+    const c = new vec3(info.x * C.d, info.y * C.d, -C.d)
+    this.cardRoot.getTransform().setWorldPosition(c)
+    const L = expanded ? C.layouts[info.layout] : null
+    this.cardPlates.forEach((pl, i) => (pl.enabled = i === (expanded ? info.layout + 1 : 0)))
+    const plate = this.cardPlates[expanded ? info.layout + 1 : 0]
+    plate.getTransform().setWorldPosition(new vec3(c.x, c.y, c.z - 1.2))
+    const hy = expanded ? info.h / 2 - C.ch / 2 : 0
+    this.cardHeader.button.sceneObject.getTransform().setLocalPosition(new vec3(0, hy, 0.5))
+    list.forEach((d: any, i: number) => {
+      const r = this.cardRows[i]
+      r.name.sceneObject.enabled = expanded
+      r.hint.sceneObject.enabled = expanded && L.hints
+      if (!expanded) return
+      const col = i % L.cols
+      const row = Math.floor(i / L.cols)
+      const ry = info.h / 2 - C.ch - L.rowH * (row + 0.5)
+      const lx = -info.w / 2 + C.pad + (col + 0.5) * L.cellW
+      r.name.text = (d.done ? "✓ " : "○ ") + d.name
+      r.name.textFill.color = d.done ? new vec4(0.55, 1, 0.65, 1) : new vec4(1, 1, 1, 1)
+      r.hint.text = d.done || !L.hints ? "" : d.hint
+      r.name.sceneObject.getTransform().setLocalPosition(new vec3(lx, L.hints ? ry + 0.45 : ry, 0.8))
+      r.hint.sceneObject.getTransform().setLocalPosition(new vec3(lx, ry - 0.55, 0.8))
+    })
   }
 
   // ---- Rule editor: five coloured rule pills in a column, placed beside the tapped link by the controller ----

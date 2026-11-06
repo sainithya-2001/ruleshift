@@ -591,7 +591,7 @@ if (script.runTests) {
         var nm20 = nodes.map(function (n) { return n.obj.name; }).join(",");
         check("20 universe: home, cat, lantern and flower load as models instantly", nm20 === "Home,Cat,Lantern,Flower" && nodes.every(function (n) { return n.imagined === true && !!n.modelRoot; }), nm20);
         var rr20 = nodes.map(function (n) { return n.radius; });
-        check("20 universe: home ~1.5x and cat ~0.7x the base size, home heavy and cat light", Math.abs(rr20[0] / rr20[2] - 1.5) < 0.05 && Math.abs(rr20[1] / rr20[2] - 0.7) < 0.05 && Math.abs(rr20[3] / rr20[2] - 1) < 0.05 && nodes[0].accel < 1 && nodes[1].accel > 1, rr20.map(function (r) { return r.toFixed(1); }).join(","));
+        check("20 universe: home ~1.5x and cat ~0.7x the base size, home heavy and cat light", Math.abs(rr20[0] / rr20[3] - 1.5) < 0.05 && Math.abs(rr20[1] / rr20[3] - 0.7) < 0.05 && rr20[2] < rr20[3] && nodes[0].accel < 1 && nodes[1].accel > 1, rr20.map(function (r) { return r.toFixed(1); }).join(","));
         function link20(x, y) { return T.slots.filter(function (c) { return c.active && ((c.A.obj.name === x && c.B.obj.name === y) || (c.A.obj.name === y && c.B.obj.name === x)); })[0]; }
         var cl20 = link20("Cat", "Lantern"), lf20 = link20("Lantern", "Flower"), ch20 = link20("Cat", "Home");
         check("20 universe: links ready (cat-lantern ATTRACT, lantern-flower COLLISION TRIGGER, cat-home ATTRACT)", conns.length === 3 && !!cl20 && !!lf20 && !!ch20 && cl20.rule === "ATTRACT" && lf20.rule === "COLLISION_TRIGGER" && ch20.rule === "ATTRACT");
@@ -608,20 +608,31 @@ if (script.runTests) {
         var r2 = lf20.lblRect, fk = { x: tr20.x, y: tr20.y, hw: 0.04, hh: 0.02 };
         check("20 A pill placed on a label pushes the label off it", !(Math.abs(r2.x - fk.x) < r2.hw + fk.hw && Math.abs(r2.y - fk.y) < r2.hh + fk.hh));
         T.setTestPill(null); T.tap(1); yield 0.2;
-        var cat20 = nodes[1], hom20 = nodes[0], lan20 = nodes[2];
-        var ch0 = cat20.pos.distance(hom20.pos), cl0 = cat20.pos.distance(lan20.pos), rest20 = cat20.radius + hom20.radius + 6;
-        var maxX20 = 0, outside20 = 0;
-        api.activate(); var g20 = 0, tp20 = 0, chF = ch0, clF = cl0;
-        while (g20 < 8 && T.fires(lf20) < 1) { yield 0.25; g20 += 0.25; }
-        chF = cat20.pos.distance(hom20.pos); clF = cat20.pos.distance(lan20.pos);
-        check("20 story: before the flip the cat moves toward the lantern and away from home", cl0 - clF >= 3 && chF - ch0 >= 1.5, "to lantern " + (cl0 - clF).toFixed(1) + " from home " + (chF - ch0).toFixed(1));
-        check("20 universe: on Play the lantern drifts into the flower and the collision fires within 6 s", T.fires(lf20) >= 1 && g20 <= 6, "after " + g20.toFixed(2) + "s");
+        var cat20 = nodes[1], hom20 = nodes[0], lan20 = nodes[2], flo20 = nodes[3];
+        var catS = new vec3(cat20.pos.x, cat20.pos.y, cat20.pos.z), rest20 = cat20.radius + hom20.radius + 6;
+        check("20 universe: the lantern starts far from the flower", lan20.pos.distance(flo20.pos) - lan20.radius - flo20.radius > 8, "gap " + (lan20.pos.distance(flo20.pos) - lan20.radius - flo20.radius).toFixed(1));
+        api.activate();
+        var chase = 0, tCh = 0;
+        while (tCh < 20) { yield 0.5; tCh += 0.5; chase = Math.max(chase, cat20.pos.distance(catS)); }
+        var cl20d = cat20.pos.distance(lan20.pos);
+        print("RULESHIFT story chase " + chase.toFixed(1) + " cat-lantern " + cl20d.toFixed(1) + " lantern-flower gap " + (lan20.pos.distance(flo20.pos) - lan20.radius - flo20.radius).toFixed(1));
+        check("20 story: nothing collides by itself for 20 s (lantern-flower never fire)", T.fires(lf20) === 0 && api.getState() === "live", "fires " + T.fires(lf20));
+        check("20 story: the cat visibly chases the lantern 10-15 cm", chase >= 10 && chase <= 15, "travel " + chase.toFixed(1));
+        check("20 story: no discoveries yet (no hand input, nothing touched)", T.discovered().join() === "", T.discovered().join());
+        // drag the lantern along the bottom into the flower
+        T.pressStart(2);
+        var path = [[17, -10], [17, -4], [16.5, 0], [16, 3]];
+        for (var pi20 = 0; pi20 < path.length; pi20++) { lan20.tr.setLocalPosition(new vec3(path[pi20][0], path[pi20][1], lan20.pos.z)); yield 0.3; }
+        T.pressEnd(2, true);
+        var g20 = 0; while (g20 < 3 && T.fires(lf20) < 1) { yield 0.1; g20 += 0.1; }
+        check("20 story: dragging the lantern into the flower fires the Collision Trigger", T.fires(lf20) >= 1, "fires " + T.fires(lf20));
         var g20b = 0; while (g20b < 4 && cl20.rule !== "REPEL") { yield 0.2; g20b += 0.2; }
-        check("20 universe: the collision's pulse flips cat-lantern to REPEL (chain reaction)", cl20.rule === "REPEL", "rule " + cl20.rule + " cat-home " + ch20.rule);
-        var tEnd20 = g20 + g20b; while (tEnd20 < 5.5) { yield 0.25; tEnd20 += 0.25; }
+        check("20 story: the pulse flips cat-lantern to REPEL (chain reaction)", cl20.rule === "REPEL" && T.discovered().indexOf("chain") >= 0, "rule " + cl20.rule + " disc " + T.discovered().join());
+        var tEnd20 = 0; while (tEnd20 < 10) { yield 0.5; tEnd20 += 0.5; }
         var pA20 = new vec3(cat20.pos.x, cat20.pos.y, cat20.pos.z); yield 0.5;
         var home20 = cat20.pos.distance(hom20.pos), drift20 = cat20.pos.distance(pA20);
-        check("20 story: after the flip the cat retreats to home and settles there within 6 s of Play", home20 <= rest20 + 1.5 && drift20 < 0.5, "dist " + home20.toFixed(1) + " rest " + rest20.toFixed(1) + " drift " + drift20.toFixed(2) + " t " + (tEnd20 + 0.5).toFixed(2));
+        print("RULESHIFT story retreat dist " + home20.toFixed(1) + " rest " + rest20.toFixed(1) + " drift " + drift20.toFixed(2));
+        check("20 story: the cat retreats home and settles there within 10 s of the flip", home20 <= rest20 + 1.5 && drift20 < 0.5, "dist " + home20.toFixed(1) + " rest " + rest20.toFixed(1) + " drift " + drift20.toFixed(2));
         var lo20b = 0; T.connections.forEach(function (c) { var li = T.labelInfo(c); if (!li.ext || li.hits) { lo20b++; } });
         var inb20 = nodes.every(function (n) { return Math.abs(n.pos.x) <= 17 + 0.01 && n.pos.y <= 8.01 && n.pos.y - n.radius >= -21; });
         check("20 story: all objects stay on the stage and no label overlaps a node or label", inb20 && lo20b === 0 && T.labelOverlaps() === 0, "inb " + inb20 + " lbl " + lo20b);
@@ -757,6 +768,123 @@ if (script.runTests) {
         api.reset(); yield 0.2;
         script.controller.demoStage = ""; api.applyDemoSetup(); yield 0.3;
 
+        // 23 Discoveries: five goals detected from system events (never from specific objects), each reachable from two different setups; dragging alone never earns one
+        function mk23(x, y, key) { var i = api.spawn({ shape: "sphere", sizeKey: key || "M", bounce: "low", weight: "light" }); T.place(i, new vec3(x, y, -95)); nodes[i].initial = new vec3(x, y, -95); return i; }
+        function D() { return T.discovered().join(); }
+        function has(id) { return T.discovered().indexOf(id) >= 0; }
+        function* waitFor(id, maxS) { var w = 0; while (w < maxS && !has(id)) { yield 0.1; w += 0.1; } return w; }
+        function* dragTo(i, x, y) {   // a hand drag: press, glide in steps, release
+            var n = nodes[i], sx = n.pos.x, sy = n.pos.y; T.pressStart(i);
+            for (var k = 1; k <= 8; k++) { n.tr.setLocalPosition(new vec3(sx + (x - sx) * k / 8, sy + (y - sy) * k / 8, n.pos.z)); yield 0.1; }
+            T.pressEnd(i, true); yield 0.2;
+        }
+        // the card: collapsed by default, never over objects or the toolbar, ticks persist until Clear all
+        api.clearAll(); yield 0.3; api.loadDemo(); yield 0.6;
+        var ci = api.cardInfo ? api.cardInfo() : null;
+        check("23 card exists, collapsed by default, in a top corner", !!ci && T.cardState().open === false && ci.expanded === false && ci.y > 0 && Math.abs(ci.x) > 0.1, ci ? JSON.stringify(ci) : "no card");
+        check("23 collapsed card never covers objects, labels, Delete pill or the toolbar (demo)", T.cardOverlaps() === 0, "overlaps " + T.cardOverlaps());
+        check("23 card header counts progress (0/5) and lists 5 goals", T.cardState().header === "Discoveries 0/5" && api.discoveries().length === 5, T.cardState().header);
+        T.toggleCard(); yield 0.4;
+        var ce = api.cardInfo();
+        check("23 expanded card fits clear of everything and shows 5 rows", T.cardState().open === true && ce.expanded === true && T.cardOverlaps() === 0 && T.cardState().rows.length === 5, JSON.stringify(ce) + " ov " + T.cardOverlaps());
+        T.toggleCard(); yield 0.2;
+        script.controller.demoStage = "universe"; api.applyDemoSetup(); yield 0.6;
+        var bad23 = 0; T.toggleCard(); yield 0.4; if (T.cardOverlaps() !== 0 || !api.cardInfo().expanded) { bad23++; } T.tap(1); yield 0.4; if (T.cardOverlaps() !== 0 || !api.cardInfo().expanded) { bad23++; } T.tap(1); T.toggleCard(); yield 0.4; if (T.cardOverlaps() !== 0) { bad23++; }
+        check("23 card opens without overlap in the dense universe layout (also with the Delete pill showing; collapsed again afterwards)", bad23 === 0, "bad " + bad23);
+        script.controller.demoStage = ""; api.applyDemoSetup(); yield 0.3;
+
+        // dragging alone never earns a discovery (no links, then plain links, then Transfer+Grow links; creation and live)
+        api.clearAll(); yield 0.2; mk23(-8, -6); mk23(8, -6); mk23(0, 4);
+        yield* dragTo(0, 8, -6); yield 0.5;
+        api.activate(); yield 0.3; yield* dragTo(2, 8, -5); yield* dragTo(1, 0, 4); yield 1;
+        check("23 no discovery from dragging objects into each other (no links, creation then live)", D() === "", D());
+        api.reset(); api.clearAll(); yield 0.2; mk23(-8, -6); mk23(8, -6); mk23(0, 4);
+        T.connect(0, 1, "TRANSFER"); T.connect(1, 2, "GROW"); T.connect(0, 2, "ATTRACT"); api.activate(); yield 0.3;
+        yield* dragTo(0, 8, -6); yield* dragTo(2, 8, -5); yield 1;
+        check("23 no discovery from dragging into Transfer / Grow / Attract links (hand input is not a system event)", !has("contact") && !has("cradle") && !has("growth") && !has("rewrite"), D());
+
+        // 1 First contact: setup A (two free spheres, one kicked) and setup B (a Collision Trigger pair kicked vertically from the other side)
+        api.clearAll(); yield 0.2; mk23(-7, -6); mk23(7, -6); api.activate(); nodes[0].vel = new vec3(20, 0, 0);   // damping stops a kick within ~7 cm, so the pair starts a few cm apart
+        var wA = yield* waitFor("contact", 3);
+        check("23 First contact (setup A: a free sphere hits another)", has("contact"), "t " + wA.toFixed(1) + " " + D());
+        check("23 discovery sparkles", T.sparkleActive() > 0, "sparks " + T.sparkleActive());
+        api.clearAll(); yield 0.2; mk23(-3, 5); mk23(-3, -9); T.connect(0, 1, "COLLISION_TRIGGER"); api.activate(); nodes[1].vel = new vec3(0, 20, 0);
+        var wB = yield* waitFor("contact", 3);
+        check("23 First contact (setup B: a Collision Trigger pair collides vertically)", has("contact") && !has("chain"), "t " + wB.toFixed(1) + " " + D());
+
+        // 2 Chain reaction: setup A (kicked Collision Trigger pair flips an Attract link) and setup B (dragged into the trigger flips a Repel link)
+        api.clearAll(); yield 0.2; mk23(-9, -8); mk23(5, -8); mk23(8, 4); T.connect(0, 1, "COLLISION_TRIGGER"); T.connect(1, 2, "ATTRACT"); api.activate(); nodes[0].vel = new vec3(20, 0, 0);
+        var wC = yield* waitFor("chain", 5);
+        check("23 Chain reaction (setup A: a collision pulse flips an Attract link)", has("chain") && T.connections[1].rule === "REPEL", "t " + wC.toFixed(1) + " rule " + T.connections[1].rule + " " + D());
+        api.clearAll(); yield 0.2; mk23(-12, -10); mk23(2, -10); mk23(2, 3); T.connect(0, 1, "COLLISION_TRIGGER"); T.connect(1, 2, "REPEL"); api.activate(); yield 0.3;
+        yield* dragTo(0, -2, -10); var wD = yield* waitFor("chain", 5);
+        check("23 Chain reaction (setup B: dragging into the trigger flips a Repel link)", has("chain") && T.connections[1].rule === "ATTRACT", "t " + wD.toFixed(1) + " rule " + T.connections[1].rule + " " + D());
+
+        // 3 Growth spurt: setup A (a Grow pair touching again and again) and setup B (one object fed by two Grow links)
+        api.clearAll(); yield 0.2; mk23(-5, -6); mk23(5, -6); T.connect(0, 1, "GROW"); api.activate(); yield 0.6;
+        check("23 Growth spurt needs the maximum (one touch only is not enough)", !has("growth") && Math.abs(nodes[0].growK - 1.15) < 0.001, D());
+        for (var r23 = 0; r23 < 9 && !has("growth"); r23++) {
+            T.place(0, new vec3(-13, -6, -95)); T.place(1, new vec3(13, -6, -95)); yield 0.25;
+            var d23 = nodes[0].radius + nodes[1].radius; T.place(0, new vec3(-d23 / 2, -6, -95)); T.place(1, new vec3(d23 / 2, -6, -95)); yield 0.25;
+        }
+        check("23 Growth spurt (setup A: a Grow pair reaches 2x)", has("growth") && Math.abs(nodes[0].growK - 2) < 0.001, "k " + nodes[0].growK.toFixed(2) + " rounds " + r23);
+        api.clearAll(); yield 0.2; mk23(-14, -8, "S"); mk23(0, -8); mk23(14, -8, "S"); T.connect(0, 1, "GROW"); T.connect(1, 2, "GROW"); api.activate(); yield 0.3;
+        for (var r23b = 0; r23b < 30 && !has("growth"); r23b++) {
+            var m = nodes[1], l = nodes[0], rr = nodes[2];
+            T.place(0, new vec3(m.pos.x - (l.radius + m.radius) + 0.3, -8, -95)); yield 0.3; T.place(0, new vec3(-14, -8, -95)); yield 0.3;
+            T.place(2, new vec3(m.pos.x + (rr.radius + m.radius) - 0.3, -8, -95)); yield 0.3; T.place(2, new vec3(14, -8, -95)); yield 0.3;
+        }
+        check("23 Growth spurt (setup B: the middle object fed by two Grow links reaches 2x)", has("growth") && Math.abs(nodes[1].growK - 2) < 0.001, "k " + nodes[1].growK.toFixed(2) + " rounds " + r23b);
+
+        // 4 Newton's cradle: setup A (a kicked Transfer pair) and setup B (a three-object Transfer row, vertical kick)
+        api.clearAll(); yield 0.2; mk23(-12, -6); mk23(2, -6); T.connect(0, 1, "TRANSFER"); api.activate(); nodes[0].vel = new vec3(20, 0, 0);
+        var wE = yield* waitFor("cradle", 3);
+        check("23 Newton's cradle (setup A: a fast object hands its velocity to a resting one)", has("cradle"), "t " + wE.toFixed(1) + " " + D());
+        api.clearAll(); yield 0.2; mk23(8, 6); mk23(8, -4); mk23(8, -14); T.connect(0, 1, "TRANSFER"); T.connect(1, 2, "TRANSFER"); api.activate(); nodes[0].vel = new vec3(0, -18, 0);
+        var wF = yield* waitFor("cradle", 3);
+        check("23 Newton's cradle (setup B: a vertical Transfer row)", has("cradle"), "t " + wF.toFixed(1) + " " + D());
+
+        // 5 Rewrite reality: setup A (editor panel Attract -> Repel on an approaching pair) and setup B (tapping a link, vertical pair)
+        api.clearAll(); yield 0.2; mk23(-13, -6); mk23(13, -6); var ra = T.connect(0, 1, "ATTRACT"); api.activate(); yield 0.7;
+        check("23 Rewrite reality does not fire before any edit", !has("rewrite"), D());
+        T.openEditor(ra); yield 0.4; api.test.pressEditorPill(1);
+        var wG = yield* waitFor("rewrite", 4);
+        check("23 Rewrite reality (setup A: editing Attract to Repel while the pair approaches)", has("rewrite") && ra.rule === "REPEL", "t " + wG.toFixed(1) + " rule " + ra.rule);
+        api.clearAll(); yield 0.2; mk23(-4, 6); mk23(-4, -14); var rb = T.connect(0, 1, "ATTRACT"); api.activate(); yield 0.7;
+        T.cycleRule(rb, "tap");
+        var wH = yield* waitFor("rewrite", 4);
+        check("23 Rewrite reality (setup B: tapping the link on a vertical pair)", has("rewrite"), "t " + wH.toFixed(1) + " rule " + rb.rule + " " + D());
+        // an edit that reverses nothing (resting pair) or happens while paused/stopped does not count
+        api.clearAll(); yield 0.2; mk23(-6, -6); mk23(6, -6); var rc = T.connect(0, 1, "ATTRACT"); T.setRule(rc, "REPEL", "test"); T.openEditor(rc); yield 0.3; api.test.pressEditorPill(0); yield 0.6;
+        api.activate(); yield 0.3; T.setRule(rc, "ATTRACT", "test"); yield 1;
+        check("23 Rewrite reality does not fire when nothing reverses (edit before Play, or a resting pair)", !has("rewrite"), D());
+
+        // persistence: Reset keeps the ticks, Clear all wipes them
+        api.clearAll(); yield 0.2; mk23(-7, -6); mk23(7, -6); api.activate(); nodes[0].vel = new vec3(20, 0, 0); yield* waitFor("contact", 3);
+        T.toggleCard(); yield 0.5;
+        var cs = T.cardState();
+        check("23 the card ticks a discovered goal and counts it", has("contact") && cs.header === "Discoveries 1/5" && cs.rows[0].indexOf("\u2713") === 0, cs.header + " | " + cs.rows.join(" / "));
+        api.reset(); yield 0.4;
+        check("23 progress survives Reset", has("contact") && T.cardState().header === "Discoveries 1/5", D());
+        api.clearAll(); yield 0.4;
+        check("23 Clear all wipes the progress", D() === "" && T.cardState().header === "Discoveries 0/5", D());
+        T.toggleCard(); yield 0.2;
+
+        // the placement hint: only an object really waiting for a pinch shows it; presets, explicit positions and test placement never leave it behind
+        api.clearAll(); yield 0.2;
+        api.loadDemo(); yield 0.3; var h1 = T.hintVisible() || api.pendingPlacement() >= 0;
+        api.loadChain(); yield 0.3; var h2 = T.hintVisible() || api.pendingPlacement() >= 0;
+        api.loadUniverse(); yield 0.3; var h3 = T.hintVisible() || api.pendingPlacement() >= 0;
+        check("23 presets (demo, chain, universe) never leave the placement hint visible", !h1 && !h2 && !h3, [h1, h2, h3].join());
+        api.clearAll(); yield 0.2; api.spawn({ shape: "sphere", sizeKey: "M", pos: new vec3(0, -6, -95) }); yield 0.2;
+        check("23 an object spawned at a given position does not wait for a pinch (no hint)", !T.hintVisible() && api.pendingPlacement() === -1);
+        var wi = api.spawn({ shape: "sphere", sizeKey: "M" }); yield 0.2; var hw = T.hintVisible();
+        T.place(wi, new vec3(10, -6, -95)); yield 0.2;
+        check("23 a spawned object shows the hint only until it is placed", hw === true && !T.hintVisible() && api.pendingPlacement() === -1, "waiting " + hw);
+        var wj = api.spawn({ shape: "sphere", sizeKey: "M" }); yield 0.2; T.pressStart(wj); yield 0.1; T.pressEnd(wj, true); yield 0.2;
+        check("23 pressing the waiting object clears the hint", !T.hintVisible());
+        api.clearAll(); yield 0.2;
+
         api.reset();
         var pass = results.filter(function (r) { return r; }).length;
         print("RULESHIFT TEST SUMMARY: " + pass + "/" + results.length + " PASS" + (pass === results.length ? " - ALL PASS" : " - FAILURES"));
@@ -837,7 +965,7 @@ if (script.showUniverse) {
         script.createEvent("UpdateEvent").bind(function (e) {
             el += e.getDeltaTime();
             if (st === 0 && el > 1) { script.controller.demoStage = "universe"; api.applyDemoSetup(); st = 1; print("RULESHIFT SHOW opening"); }
-            else if (st === 1 && el > 11) { api.activate(); st = 2; print("RULESHIFT SHOW play"); }
+            else if (st === 1 && el > 11) { api.activate(); st = 2; T.toggleCard(); print("RULESHIFT SHOW play (Discoveries card open)"); }
             else if (st === 2 && T.connections.some(function (c) { return c.rule === "REPEL"; }) && el > 11.8) { st = 3; print("RULESHIFT SHOW chain-flipped"); }
         });
     });
