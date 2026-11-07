@@ -1,12 +1,44 @@
-# Status (updated after Step 3)
+# Status (updated after the visual pass)
 
-Built since the original handoff: Transfer and Grow rules (5 rules total); contextual rule editor (tap a link, panel of 5 coloured pills beside it, applies live); Discoveries card (5 system-event goals, sparkle + caption, persists until Clear); universe preset (saved Snap3D models in `Assets/RULESHIFT Models/`, hand-triggered chain: lantern starts far, cat chases ~10 cm, drag lantern into flower to fire the chain); placement-hint fix; sim-clock test mode (`fixedStep`, 0.1 s per frame, set by the harness).
+**Latest code commit:** `b167d67` Visual pass (curved beams, procedural model life, ambient sparkles). **Tests:** 308/308 PASS on the sim clock.
 
-Tests: 308/308 PASS on the sim clock (`runTests` on the RULESHIFT Tests object, read the `RULESHIFT TEST SUMMARY` log line, turn it off after). Workflow: tests pass before each commit; commit and push per step.
+## Workflow rules
+- Tests must pass before each commit; commit and push per step; retune test values, never delete checks; keep reports short.
+- Run tests: set `runTests` on the RULESHIFT Tests object (scene-graphql `setProperty`, `valueType: BOOLEAN`), run `RecompileTypeScriptTool`, then `RunAndCollectLogsTool` (refresh), read the `RULESHIFT TEST SUMMARY` log line, turn the flag off. The suite runs on a fixed 0.1 s sim clock (`fixedStep`), so it is load-independent.
+- Never use curl/fetch/HTTP against Lens Studio; use the MCP tools.
+- **Banned MCP tools** (each reinstalls AiPreviewAgentInspect.lspkg or needs it/Leaf and breaks the TS compile): PreviewInteractTool, QueryRuntimeSceneTool, CaptureRuntimeViewTool, InjectPreviewGesture, list_leaf_scenarios, run_leaf_scenario, open_leaf_panel, push_leaf_lens, set_leaf_execution_target. Do not install AiPreviewAgent* or Leaf; if a skill tries to, stop and tell the user. Allowed: RunAndCollectLogsTool, CapturePanelScreenshotTool, ExecuteEditorCode, RecompileTypeScriptTool, scene-graphql, asset-graphql, other editor tools.
 
-Limits to state honestly: tested in Lens Studio Preview only (no Spectacles hardware); voice is device-only (Preview has no mic ASR); real taps on the editor pills and Discoveries card are untested (tests call the same functions); the universe layout is cramped.
+## Snap3D token setup
+Generation (Surprise, voice-to-3D) needs a Snap token. In Lens Studio: Window > Remote Service Gateway Token, generate a token, copy `Assets/Scripts/Snap3DConfig.example.ts` to `Assets/Scripts/snapTokenLocal.ts` and set `SNAP_TOKEN`. That file is gitignored: never commit a token or paste it into a scene component. The log line `RULESHIFT Snap3D token: present (local override)` confirms it loaded. Without a token the Lens still runs and generation falls back to the orb with "Couldn't imagine that". Generation takes about 30 s and the safety filter rejects some prompts.
 
-Still-valid rules from the original handoff follow.
+## What is built
+Five rules (Attract, Repel, Collision Trigger, Transfer, Grow); contextual rule editor (tap a link, panel of five coloured pills, applies live); Discoveries card (five system-event goals); thin curved glowing beams with flowing motes, rule name shown only on the selected link; procedural life on saved models (cat turns and hops, lantern sways, island bobs, flower pulses); a few ambient sparkles; cause pulses; sim-clock test mode.
+
+## Presets (`demoStage` input on the controller; empty by default = empty stage for recording)
+- `""` (default): empty stage with the placement hint.
+- `chain`: three spheres (gem, orb, cube) spread across the stage with Attract, Repel and On Collision links so one collision flips another rule.
+- `universe`: four saved Snap3D models from `Assets/RULESHIFT Models/` (house on a floating island 1.5x heavy, cat 0.7x light, lantern, flower). Cat-lantern Attract, lantern-flower Collision Trigger, cat-home Attract. Hand-triggered: the cat chases the lantern (about 10 cm); drag the lantern into the flower, the pulse flips cat-lantern to Repel and the cat is pushed home. No token needed.
+- Test-only scene flags on the tests object: `showUniverse`, `showEditor`, `showGrow`, `showShots`, `shotsPulses`, `liveImagine`, `showCause`. Keep all off when committing.
+
+## Known issues / honest limits
+- Preview only: no Spectacles hardware testing. Voice is device-only (no mic ASR in Preview).
+- Real taps on the editor pills and the Discoveries card are untested (tests call the same functions).
+- The universe layout is cramped on the current stage; the chase is only about 10 cm.
+- Cat facing direction was tuned in Preview only; the real model's forward axis on device is unconfirmed.
+- Up to 8 objects. Post-effects (bloom/glow) were not measured; no fps figures.
+- Lens Studio can run stale scripts: always run `RecompileTypeScriptTool` before refreshing the Preview.
+
+## Locked direction (next work, not yet implemented)
+A user-created living world in the user's real room. Creation and simulation are the two primary actions. No new rules, shapes or challenges.
+- **Room as canvas:** remove the stage disc; objects live 0.5-2 m away at different heights, on real surfaces (WorldQuery, Sunlit Room table/floor as fallback) or floating; bounds become a large volume; retune forces, distances, collision sizes and caps for room scale; hero objects 20-40 cm.
+- **Sample world plus live creation:** a `room` preset as the sample world (island house above the table, flower on the floor, floating lantern, cat on the floor), story through the real rule engine (cat-lantern Attract, lantern into flower fires the trigger, flips to Repel, cat flees home). The user can then create and change things live.
+- **Minimal contextual UI:** controls appear only when relevant.
+- **Discoveries off** by default.
+- **Palette moved under Create** as "Basic building blocks".
+- **Voice inside Create** (no separate Speak control).
+- Preserve: AI generation, saved models, the rule engine, cause pulses, tests. Add every asset and licence to a CREDITS section in the README. Design for bright rooms (saturated colours, bright beam cores, outlined UI text). Parked decisions from the Step 0 report: UI anchoring, which saved models to keep versus new assets, whether to test bloom on a throwaway branch.
+
+Original handoff follows (older details; this Status section wins on conflicts).
 
 ---
 
