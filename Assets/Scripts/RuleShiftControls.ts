@@ -283,7 +283,7 @@ export class RuleShiftControls extends BaseScriptComponent {
         const cy = top + hh - pad - ph / 2 - i * (ph + g)
         const bp = api.makePlate("More Opt " + it.label, pwid, ph, 0.2, new vec3(cx, cy, Z - 0.8), PILL, -7)
         bp.setParent(this.moreMenu)
-        const p = this.makePill(this.moreMenu, "More" + it.label, it.label, it.icon, new vec3(cx, cy, Z + 0.5), new vec2(pwid, ph), 46)
+        const p = this.makePill(this.moreMenu, "More" + it.label, it.label, it.icon, new vec3(cx, cy, Z + 0.5), new vec2(pwid, ph), 58)
         p.button.onTriggerUp.add(() => {
           it.fn()
           this.closeMenus()
@@ -333,7 +333,7 @@ export class RuleShiftControls extends BaseScriptComponent {
       const saved: string[] = api.savedModels()
       row(
         saved.map((name) => ({label: name, icon: null as Texture | null, fn: () => this.spawnSaved(name)})),
-        52
+        58
       )
       // the old palette stays reachable, collapsed behind one wide pill
       const bp = api.makePlate("Create Opt Basic", inner, 3.4, 0.2, new vec3(cx, yy - 1.7, Z - 0.8), PILL, -7)
