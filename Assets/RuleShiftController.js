@@ -42,10 +42,10 @@ function roomMode() { return K !== 1; }
 // Room geometry (cm, the camera sits at the origin looking down -z). Measured in the Preview's Sunlit Room by camera parallax: eye height is about 1.5 m, so the floor is at y = -150
 // (+-15 cm); the room's real tables are beyond the 2 m range (the coffee table is ~3.2 m away, the credenza ~4.4 m). The "table" fallback is therefore a virtual 75 cm table
 // plane within reach (y = -75); on a device WorldQuery finds the real surfaces first and these are only the fallback. The legacy stage kept its by-eye table height (-19).
-var TABLE_Y_STAGE = -19, TABLE_Y_ROOM = -75, FLOOR_Y = -150;
+var TABLE_Y_STAGE = -19, TABLE_Y_ROOM = -24, FLOOR_Y = TABLE_Y_ROOM;   // room: the virtual table is 24 cm below eye level (Preview has no real table within 2 m) and is also the floor of the play volume, so everything stays in the default view above the toolbar
 function tableY() { return roomMode() ? TABLE_Y_ROOM : TABLE_Y_STAGE; }
-var TABLE_RECT = { x: 70, zNear: -70, zFar: -160 };   // where the table fallback applies; a ray landing outside it continues to the floor
-var ROOM = { x: 110, yMax: 80, zNear: -45, zFar: -260 };   // the world volume in front of the user (x half-width, ceiling, nearest and farthest depth); the floor is FLOOR_Y
+var TABLE_RECT = { x: 40, zNear: -95, zFar: -150 };   // where the table fallback applies; a ray landing outside it continues to the floor
+var ROOM = { x: 36, yMax: 42, zNear: -110, zFar: -145 };   // the play volume, 1.1-1.45 m in front of the user: x half-width 36 cm is exactly the default Preview view at 1.25 m, so nothing can leave the screen; floor = FLOOR_Y (the table), ceiling yMax
 var SIZES = { S: 7, M: 10, L: 14 };            // node scale in cm at K = 1 (diameter of the bounding sphere); spawnNode multiplies by K
 var WEIGHTS = { light: 1.6, heavy: 0.5 };      // multiplies how strongly forces move the node
 var BOUNCES = { low: 0, high: 0.85 };          // restitution on collisions and walls
@@ -162,10 +162,10 @@ function toColor(c) {
     if (c.r !== undefined) { return c; }
     return new vec4(c[0], c[1], c[2], 1);
 }
-function spawnPlane() { return roomMode() ? -130 : WORLD_Z; }   // depth where new objects appear (1.3 m in the room: inside arm's reach of the layout, in front of the table)
+function spawnPlane() { return roomMode() ? -125 : WORLD_Z; }   // depth where new objects appear (1.3 m in the room: inside arm's reach of the layout, in front of the table)
 function spotBox(radius) {   // the region new objects are offered: the legacy stage box, or the comfortable part of the room in front of the user
     if (!roomMode()) { return { x0: -BOX_X + radius, x1: BOX_X - radius, y0: BOX_YMIN + radius, y1: BOX_YMAX - radius, step: 0.5, cy: -2 }; }
-    return { x0: -70 + radius, x1: 70 - radius, y0: -30 + radius, y1: 50 - radius, step: 2, cy: 8 };
+    return { x0: -ROOM.x + radius, x1: ROOM.x - radius, y0: FLOOR_Y + radius, y1: ROOM.yMax - radius, step: 2, cy: 8 };
 }
 function findFreeSpot(radius) {
     var b = spotBox(radius), z0 = spawnPlane(), cy = b.cy, sk = roomMode() ? K : 1;
@@ -504,7 +504,9 @@ function setRule(c, rule, why) {
     print("RULESHIFT " + c.A.obj.name + "-" + c.B.obj.name + " rule -> " + rule + " (" + why + ")");
 }
 
-var LINK_GAP = 6;  // visible link length when attracted
+var LINK_GAP = 6;  // visible link length when attracted (room: 6 cm, not scaled, so a compact room layout still leaves room to travel)
+function gapK() { return roomMode() ? 1 : K; }
+function repK() { return roomMode() ? K * 0.5 : K; }   // repel range: 48 cm in the room, so the cat flees about 20 cm and stays in view
 var REPEL_RANGE = 40, DAMPING = 3.0, MAX_SPEED = 40;
 function computeForces() {
     nodes.forEach(function (n) { n.force = vec3.zero(); });
@@ -516,10 +518,10 @@ function computeForces() {
         var f = 0;
         // every length, speed and force is scaled by K, so a room-scale world is an exact K-times copy of the stage dynamics (same timing, K-times the distance)
         if (c.rule === RULES.ATTRACT) {
-            var rest = A.radius + B.radius + LINK_GAP * K;
+            var rest = A.radius + B.radius + LINK_GAP * gapK();
             f = dist > rest ? script.strength * 30 * K * Math.min(1, (dist - rest) / (10 * K)) : 0;
         } else if (c.rule === RULES.REPEL) {
-            f = dist < REPEL_RANGE * K ? -script.strength * 60 * K * (1 - dist / (REPEL_RANGE * K)) - 6 * K : 0;
+            f = dist < REPEL_RANGE * repK() ? -script.strength * 60 * K * (1 - dist / (REPEL_RANGE * repK())) - 6 * K : 0;
         }
         // positive f pulls A toward B and B toward A
         A.force = A.force.add(dir.uniformScale(f));
@@ -832,6 +834,7 @@ function updateLabel(c) {
 }
 function beamPoint(A, C, B, u) { var a = (1 - u) * (1 - u), b = 2 * u * (1 - u), d = u * u; return new vec3(A.x * a + C.x * b + B.x * d, A.y * a + C.y * b + B.y * d, A.z * a + C.z * b + B.z * d); }
 function updateVisual(c) {
+    if (!perf.beams) { return; }
     var A = c.A.pos, B = c.B.pos;
     var delta = B.sub(A);
     var dist = Math.max(delta.length, 0.01);
@@ -919,7 +922,9 @@ function ambRand() { ambSeed = (ambSeed * 1664525 + 1013904223) % 4294967296; re
 function glowEmitters() { var out = []; nodes.forEach(function (n) { var k = n.modelRoot ? modelKind(n) : null; if (k === "lantern" || k === "flower" || (n.glowOn && !n.modelRoot)) { out.push(n); } }); return out; }
 // Asset Library VFX (see README CREDITS): Embers drift off the lantern, Sparkles hover over the flower; each is only on while its object exists.
 var vfxFollow = null;
+var perf = { vfx: true, beams: true, glow: true, ambient: true, models: true };   // test-only subsystem switches (api.test.perfSet) used to attribute frame cost
 function updateVfx() {
+    if (!perf.vfx) { if (script.embersVfx) { script.embersVfx.enabled = false; } if (script.sparklesVfx) { script.sparklesVfx.enabled = false; } return; }
     var lan = null, flo = null;
     nodes.forEach(function (n) { var k = n.modelRoot ? modelKind(n) : null; if (k === "lantern") { lan = n; } else if (k === "flower") { flo = n; } });
     [[script.embersVfx, lan, 0.1], [script.sparklesVfx, flo, 0.4]].forEach(function (e) {
@@ -929,6 +934,7 @@ function updateVfx() {
     });
 }
 function updateAmbient(dt) {
+    if (!perf.ambient) { ambActive.forEach(function (sp) { sp.o.enabled = false; }); ambActive.length = 0; return; }
     fxT += dt;
     var em = glowEmitters();
     if (em.length && ambActive.length < AMB_MAX) {
@@ -1194,6 +1200,7 @@ function updateEditor() {
     editorRect = { x: best.x, y: best.y, hw: best.hw, hh: best.hh, li: best.li, overlap: overlap };
 }
 script.api.setToolbarTop = function (ang) { toolbarTopAng = ang; };
+script.api.toolbarTop = function () { return toolbarTopAng; };
 script.api.editorSpec = EDITOR;
 script.api.editorRules = function () { return ALL_RULES.map(function (r) { var k = RULE_COLOR[r]; return { rule: r, name: EDITOR_NAMES[r], color: [k.r, k.g, k.b] }; }); };
 script.api.editorInfo = function () { return editorLink && editorRect ? { x: editorRect.x, y: editorRect.y, rule: editorLink.rule, layout: editorRect.li } : null; };
@@ -1281,13 +1288,13 @@ function loadUniverse() {
 script.api.loadUniverse = loadUniverse;
 // demoStage "room": the sample world, authored directly in room coordinates (cm, camera at the origin looking down -z; table top y = TABLE_Y, floor y = FLOOR_Y).
 // The island house floats above the real table, the lantern floats elsewhere, the flower and the cat rest on the floor (cat between them and the house).
-// The story runs through the real rule engine: cat-lantern ATTRACT, lantern-flower COLLISION TRIGGER, cat-home ATTRACT. Press Play and the cat is drawn toward the lantern;
-// drag the lantern into the flower and the collision's pulse flips cat-lantern to REPEL, so the cat flees and the house pulls it home. Nothing collides by itself.
-var ROOM_LAYOUT = {   // hero sizes 20-40 cm; centres in cm; floor objects rest on FLOOR_Y. Compact in angle (the Preview's view is only ~32 x 37 degrees): look down ~18 degrees to see it all.
-    home: { size: 40, x: -26, y: -18, z: -165 },       // floats 57 cm above the virtual table plane (y = -75), at about the height of the user's eyes
-    cat: { size: 28, x: -12, y: null, z: -205 },       // on the floor
-    lantern: { size: 24, x: 28, y: -70, z: -150 },     // floating elsewhere, at table height
-    flower: { size: 26, x: 30, y: null, z: -205 }      // on the floor
+// The story runs through the real rule engine: cat-lantern ATTRACT, lantern-flower COLLISION TRIGGER. Press Play and the cat travels to the lantern;
+// drag the lantern into the flower and the collision's pulse flips cat-lantern to REPEL, so the cat flees back toward the house. Nothing collides by itself.
+var ROOM_LAYOUT = {   // hero sizes 20-40 cm; centres in cm, all about 1.25 m out, inside the default Preview view (+-36 cm wide, -24..+41 cm tall at that depth, above the toolbar); table-resting items sit on FLOOR_Y (the virtual table)
+    home: { size: 28, x: -21, y: 26, z: -125 },        // floating island house, high on the left, behind the cat on the side away from the lantern
+    cat: { size: 26, x: -22, y: null, z: -125 },       // on the table, left
+    lantern: { size: 22, x: 14, y: 14, z: -125 },      // floating between and above
+    flower: { size: 24, x: 24, y: null, z: -125 }      // on the table, right
 };
 function loadRoom() {
     clearAll();
@@ -1299,8 +1306,7 @@ function loadRoom() {
     var flower = spawnModelNode(script.flowerModel, "Flower", L.flower.size, null, at(L.flower), NODE_COLORS[0]);
     if (home && cat && lantern && flower) {
         activateLink(slotFor(lantern, flower, true), RULES.COLLISION_TRIGGER, true);
-        activateLink(slotFor(cat, lantern, true), RULES.ATTRACT, true);
-        activateLink(slotFor(cat, home, true), RULES.ATTRACT, true);
+        activateLink(slotFor(cat, lantern, true), RULES.ATTRACT, true);   // no cat-home link at the start: the house only marks where the cat flees to
     }
     pendingPlace = null;
     print("RULESHIFT demo stage: room");
@@ -1371,6 +1377,14 @@ script.api.test = {
     // the legacy regression suite runs at the original stage scale (K = 1); the room suite at ROOM_K. Switch only while no objects exist (clearAll first).
     setWorldScale: function (k) { K = k; causePool.forEach(function (p) { p.parts.forEach(function (t, i) { t.setLocalScale(vec3.one().uniformScale(CAUSE_SIZES[i] * K / SPHERE_D)); }); }); },
     ROOM_K: ROOM_K,
+    perfSet: function (name, on) {
+        perf[name] = !!on;
+        if (name === "beams") { connections.forEach(function (c) { c.visual.enabled = !!on; }); }
+        if (name === "glow") { nodes.forEach(function (n) { (n.glow || []).forEach(function (o) { o.enabled = !!on; }); }); }
+        if (name === "models") { nodes.forEach(function (n) { if (n.modelRoot) { n.modelRoot.enabled = !!on; } }); }
+    },
+    prof: function (on) { PROF = !!on; profAcc = {}; profFrames = 0; },
+    profReport: function () { var o = []; for (var k in profAcc) { o.push(k + "=" + (profAcc[k] / Math.max(profFrames, 1)).toFixed(2)); } var rr = o.join(" ") + " (ms/frame over " + profFrames + " frames)"; profAcc = {}; profFrames = 0; return rr; },
     planeHit: function (o, d) { var h = planeHit(o, d); return h ? { p: h, surface: lastSurface } : null; },
     nodes: nodes, connections: connections, slots: slots,
     tap: function (i) { handleTapNode(nodes[i]); },
@@ -1436,7 +1450,10 @@ script.api.test = {
 
 var SUBSTEP = 0.02, MAX_SUBSTEPS = 6, fixedStep = 0;   // fixedStep > 0 (tests only) replaces real dt with a constant step
 var elapsed = 0, lastToggle = 0;
+var PROF = false, profAcc = {}, profLast = 0, profFrames = 0;   // CPU profile of the update loop (test only: api.test.prof(true)); Date.now has ms resolution, so read the per-frame averages
+function pm(name) { if (!PROF) { return; } var t = Date.now(); profAcc[name] = (profAcc[name] || 0) + (t - profLast); profLast = t; }
 script.createEvent("UpdateEvent").bind(function (e) {
+    if (PROF) { profLast = Date.now(); profFrames++; }
     var fdt = fixedStep > 0 ? fixedStep : e.getDeltaTime();   // tests run on a fixed simulation clock: every time source below advances by the same step per frame, independent of host load
     var dt = Math.min(fdt, 0.05);
     frameCount++;
@@ -1466,7 +1483,7 @@ script.createEvent("UpdateEvent").bind(function (e) {
         lastToggle = elapsed;
         cycleRule(connections[0], "auto");
     }
-    syncDragged();
+    pm("pre"); syncDragged();
     if (state === "live") {   // real elapsed time, split into fixed substeps so motion keeps real-time speed at low fps without going unstable
         var total = fixedStep > 0 ? fixedStep : Math.min(fdt, MAX_SUBSTEPS * SUBSTEP);
         var steps = Math.max(1, Math.min(MAX_SUBSTEPS, Math.ceil(total / SUBSTEP - 1e-6)));
@@ -1476,24 +1493,24 @@ script.createEvent("UpdateEvent").bind(function (e) {
             integrate(total / steps);
         }
     }
-    detectContacts();
+    pm("physics"); detectContacts(); pm("contacts");
     for (var it = 0; it < 6; it++) {   // push apart, then re-clamp so a shove can never leave the box
         resolveOverlaps(it >= 2);
         nodes.forEach(function (n) { if (!n.dragging || it >= 2) { n.pos = clampToBox(n, n.pos); n.tr.setLocalPosition(n.pos); } });
     }
-    if (state === "live") { checkCollisions(); }
+    pm("overlaps"); if (state === "live") { checkCollisions(); }
     updatePulses(dt);
     updateCause(realDt);
-    updateRewrite(realDt); updateSparkles(realDt); updateAmbient(realDt); updateVfx(); updateModelLife(realDt);
+    pm("pulses"); updateRewrite(realDt); updateSparkles(realDt); pm("sparkles"); updateAmbient(realDt); pm("ambient"); updateVfx(); updateModelLife(realDt); pm("life");
     updateImagine(dt);
     updateSelection();
     hintObj.enabled = !!pendingPlace && !goalEnabled;
     updateGoal(Math.min(fdt, 0.25));   // real time, so goal timers don't slow down at low frame rates
     placedLabels.length = 0;
-    connections.forEach(updateLabel);
-    connections.forEach(updateVisual);
+    pm("goal"); connections.forEach(updateLabel); pm("labels");
+    connections.forEach(updateVisual); pm("beams");
     updateCard();
-    updateEditor();
+    updateEditor(); pm("ui");
 });
 script.createEvent("OnStartEvent").bind(function () {
     if (script.demoPreset) { applyDemoSetup(); }
@@ -1551,7 +1568,7 @@ script.api.parseVoice = parseVoice;
 // imagine(prompt) spawns a normal node (a pulsing placeholder orb with an "Imagining '<prompt>'..." caption). The injected
 // generator (setGenerator) later delivers a glTF asset; the orb's visuals are then swapped for the model while the node
 // keeps all behaviour (drag, link, rules, physics). On failure, or after the timeout, the orb simply stays.
-function imagineSize() { return roomMode() ? 16 * K : 18; }   // node footprint in cm: 18 at the legacy stage; 16 x K = 38 cm in the room (inside the 20-40 cm hero range)
+function imagineSize() { return roomMode() ? 12 * K : 18; }   // node footprint in cm: 18 at the legacy stage; 16 x K = 38 cm in the room (inside the 20-40 cm hero range)
 var GROW_START = 0.65, GROW_TAU = 20;                    // the pending orb starts at 65% and slowly grows towards full size (time constant in s)
 var IMAGINE_COLOR = new vec4(0.7, 0.55, 1.0, 1);
 var IMAGINE_TIMEOUT = 120;                               // seconds

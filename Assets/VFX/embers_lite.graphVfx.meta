@@ -1,0 +1,66 @@
+- !<AssetImportMetadata/ab0efe75-2448-46e2-9600-9efb3c4fc9c3>
+  ImportedAssetIds:
+    VFXGraph: !<reference> 2193568e-1b11-4ebc-99ed-3bb4fab55e89
+  ImporterName: VFXAssetImporter
+  PrimaryAsset: !<reference> 2193568e-1b11-4ebc-99ed-3bb4fab55e89
+  PackageType: NotAPackage
+  LegacyPackagePolicy: ~
+  ExtraData:
+    {}
+  AssetDataMap:
+    VFXGraph: !<own> 9d7455fe-d084-48e2-b458-85adce5c7700
+  DependentFiles:
+    []
+  ImporterSettings: !<AssetImporterSettings>
+    {}
+  CompressionSettings: !<own> 00000000-0000-0000-0000-000000000000
+- !<VFXAssetData/9d7455fe-d084-48e2-b458-85adce5c7700>
+  SystemPassProperties:
+    0: !<VFXSystemPassProperties>
+      PassPropertiesMap:
+        feedback_0: !<VFXPassProperties>
+          PropertyMap:
+            {}
+          Defines:
+            []
+          Mesh: !<reference> 00000000-0000-0000-0000-000000000000
+        render_0_0: !<VFXPassProperties>
+          PropertyMap:
+            mainTex:
+              typeIdx: 9
+              value:
+                id: 00000000-0000-0000-0000-000000000000
+                sampler:
+                  filteringMode: Bilinear
+                  wrapModeU: ClampToEdge
+                  wrapModeV: ClampToEdge
+                  wrapModeW: ClampToEdge
+                  borderColor: {x: 0.000000, y: 0.000000, z: 0.000000, w: 0.000000}
+                  mipmaps: false
+                type: Texture2D
+            colorrampTex:
+              typeIdx: 9
+              value:
+                id: 00000000-0000-0000-0000-000000000000
+                sampler:
+                  filteringMode: Bilinear
+                  wrapModeU: ClampToEdge
+                  wrapModeV: ClampToEdge
+                  wrapModeW: ClampToEdge
+                  borderColor: {x: 0.000000, y: 0.000000, z: 0.000000, w: 0.000000}
+                  mipmaps: false
+                type: Texture2D
+          Defines:
+            []
+          Mesh: !<reference> 00000000-0000-0000-0000-000000000000
+        simulate_0: !<VFXPassProperties>
+          PropertyMap:
+            Tweak_N26:
+              typeIdx: 5
+              value: {x: 1.000000, y: 1.000000, z: 1.000000, w: 1.000000}
+            Tweak_N27:
+              typeIdx: 5
+              value: {x: 1.000000, y: 1.000000, z: 1.000000, w: 1.000000}
+          Defines:
+            []
+          Mesh: !<reference> 00000000-0000-0000-0000-000000000000

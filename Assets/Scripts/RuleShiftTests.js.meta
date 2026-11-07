@@ -32,6 +32,7 @@
     genModels: false
     liveImagine: false
     liveImaginePrompt: false
+    perfSweep: false
     roomPlay: false
     runTests: false
     shotsPulses: false
@@ -58,6 +59,7 @@
       showUniverse: false
       showRoom: false
       roomPlay: false
+      perfSweep: false
       showEditor: false
       showGrow: false
       showShots: false

@@ -6,6 +6,7 @@
 // @input bool showUniverse = false
 // @input bool showRoom = false
 // @input bool roomPlay = false
+// @input bool perfSweep = false
 // @input bool showEditor = false
 // @input bool showGrow = false
 // @input bool showShots = false
@@ -940,16 +941,18 @@ if (script.runTests) {
         var rb = T.box, rm = api.room, rn = nodes.slice(), rnames = rn.map(function (n) { return n.obj.name; });
         check("25 room preset has the four heroes (home, cat, lantern, flower)", rn.length === 4 && ["Home", "Cat", "Lantern", "Flower"].every(function (s) { return rnames.indexOf(s) >= 0; }), rnames.join());
         check("25 hero objects are 20-40 cm", rn.every(function (n) { return 2 * n.radius >= 19.9 && 2 * n.radius <= 40.1; }), rn.map(function (n) { return (2 * n.radius).toFixed(0); }).join());
-        check("25 objects sit 0.5-2.1 m in front of the user (floor items are ~2 m out, ~2.5 m by line of sight)", rn.every(function (n) { return -n.pos.z >= 50 && -n.pos.z <= 210; }), rn.map(function (n) { return (-n.pos.z).toFixed(0); }).join());
+        check("25 objects sit 1.1-1.5 m in front of the user", rn.every(function (n) { return -n.pos.z >= 100 && -n.pos.z <= 150; }), rn.map(function (n) { return (-n.pos.z).toFixed(0); }).join());
+        var vw = api.view(), tx = vw.halfW / 95, ty = vw.halfH / 95;
+        check("25 everything is visible from the default camera, above the toolbar (angular extents)", rn.every(function (n) { var dp = -n.pos.z; return Math.abs(n.pos.x) + n.radius <= tx * dp + 0.01 && n.pos.y + n.radius <= ty * dp + 0.01 && n.pos.y - n.radius >= api.toolbarTop() * dp - 0.01; }), "tan x " + tx.toFixed(3) + " tan y " + ty.toFixed(3) + " toolbar " + api.toolbarTop().toFixed(3));
         check("25 all objects are inside the room volume", rn.every(function (n) { return Math.abs(n.pos.x) <= rb.x + 0.01 && n.pos.y >= rb.yMin - 0.01 && n.pos.y <= rb.yMax + 0.01 && n.pos.z <= rb.zNear + 0.01 && n.pos.z >= rb.zFar - 0.01; }));
         var rFloor = rn.filter(function (n) { return n.obj.name === "Cat" || n.obj.name === "Flower"; });
-        check("25 the cat and the flower rest on the floor", rFloor.length === 2 && rFloor.every(function (n) { return Math.abs(n.pos.y - n.radius - api.floorY) < 0.6; }), rFloor.map(function (n) { return (n.pos.y - n.radius).toFixed(1); }).join());
+        check("25 the cat and the flower rest on the table (the floor of the play volume)", rFloor.length === 2 && rFloor.every(function (n) { return Math.abs(n.pos.y - n.radius - api.floorY) < 0.6; }), rFloor.map(function (n) { return (n.pos.y - n.radius).toFixed(1); }).join());
         var ys = rn.map(function (n) { return n.pos.y; }).sort(function (a, b) { return a - b; }), hs = 1;
         for (var yi = 1; yi < ys.length; yi++) { if (ys[yi] - ys[yi - 1] > 10) { hs++; } }
         check("25 objects live at different heights (floor, table height, above)", hs >= 3, "bands " + hs);
         check("25 the island house floats above the virtual table plane and the lantern floats elsewhere", rn[0].pos.y - rn[0].radius > api.tableY && rn[2].pos.y - rn[2].radius > api.floorY + 20, "tableY " + api.tableY);
-        check("25 links: lantern-flower trigger, cat-lantern and cat-home attract", T.connections.length === 3 && conns[0].rule === "COLLISION_TRIGGER" && conns[1].rule === "ATTRACT" && conns[2].rule === "ATTRACT", T.connections.map(function (c) { return c.rule; }).join());
-        var hT = T.planeHit(new vec3(0, 0, 0), new vec3(0, -75, -100).normalize()), hF = T.planeHit(new vec3(0, 0, 0), new vec3(0, -150, -100).normalize()), hU = T.planeHit(new vec3(0, 0, 0), new vec3(0, 20, -100).normalize());
+        check("25 links: lantern-flower trigger and cat-lantern attract; no cat-home link at the start", T.connections.length === 2 && conns[0].rule === "COLLISION_TRIGGER" && conns[1].rule === "ATTRACT", T.connections.map(function (c) { return c.rule; }).join());
+        var hT = T.planeHit(new vec3(0, 0, 0), new vec3(0, -24, -125).normalize()), hF = T.planeHit(new vec3(0, 0, 0), new vec3(60, -24, -125).normalize()), hU = T.planeHit(new vec3(0, 0, 0), new vec3(0, 20, -100).normalize());
         check("25 surface fallbacks: a ray lands on the virtual table, else the floor, never above the horizon", hT && hT.surface === "table" && Math.abs(hT.p.y - api.tableY) < 0.5 && hF && hF.surface === "floor" && Math.abs(hF.p.y - api.floorY) < 0.5 && hU === null, (hT && hT.surface) + "/" + (hF && hF.surface) + "/" + hU);
         api.activate();
         var catStart = rn[1].pos.distance(rn[2].pos), nearest = catStart;
@@ -1081,20 +1084,36 @@ if (script.showUniverse) {
 // Visual check (not a test): load the room preset, wait for a screenshot, press Play, print a marker mid-chase, then drag the lantern into the flower and print a marker once the chain has flipped.
 if (script.showRoom) {
     script.createEvent("OnStartEvent").bind(function () {
-        var api = script.controller.api, T = api.test, st = 0, el = 0, fN = 0, fT = 0;
+        var api = script.controller.api, T = api.test, st = 0, el = 0, fN = 0, fT = 0, stEl = 0, abSi = -1, abN = [0, 0], abT = [0, 0], abState = -1; T.prof(true);
         script.createEvent("UpdateEvent").bind(function (e) {
             var d = e.getDeltaTime(); el += d; fN++; fT += d;
-            if (fT >= 5) { print("RULESHIFT ROOM fps " + (fN / fT).toFixed(1)); fN = 0; fT = 0; }
+            if (fT >= 5) { print("RULESHIFT ROOM fps " + (fN / fT).toFixed(1) + " | " + T.profReport()); fN = 0; fT = 0; }
             if (st === 0 && el > 1) {
                 script.controller.demoStage = "room"; api.applyDemoSetup(); st = 1; print("RULESHIFT SHOW room-opening");
                 var v = api.view(); print("RULESHIFT ROOM view halfW=" + v.halfW.toFixed(1) + " halfH=" + v.halfH.toFixed(1) + " at 95 cm (tan x " + (v.halfW / 95).toFixed(3) + ", tan y " + (v.halfH / 95).toFixed(3) + ")");
                 T.nodes.forEach(function (n) { var dp = -n.pos.z; print("RULESHIFT ROOM node " + n.obj.name + " pos " + n.pos.x.toFixed(0) + "," + n.pos.y.toFixed(0) + "," + n.pos.z.toFixed(0) + " r=" + n.radius.toFixed(0) + " ang " + (n.pos.x / dp).toFixed(3) + "," + (n.pos.y / dp).toFixed(3) + " angR " + (n.radius / dp).toFixed(3)); });
             }
-            else if (st === 1 && el > 6) { st = 2; print("RULESHIFT SHOW room-before"); }
-            else if (script.roomPlay && st === 2 && el > 9) { api.activate(); st = 3; print("RULESHIFT SHOW room-play"); }
-            else if (st === 3 && el > 12) { st = 4; print("RULESHIFT SHOW room-chase"); }
-            else if (st === 4 && el > 16) { var n = T.nodes; T.place(2, n[3].pos.add(new vec3(0, n[2].radius + n[3].radius - 0.5, 0))); st = 5; print("RULESHIFT SHOW room-collide"); }
-            else if (st === 5 && T.connections.some(function (c) { return c.rule === "REPEL"; })) { st = 6; print("RULESHIFT SHOW room-flipped"); }
+            else if (script.perfSweep && st === 1 && el > 30) {   // frame-cost attribution, interleaved A/B: each subsystem is switched on/off every 5 s for 4 cycles (drift cancels); fps is averaged over the last 3.5 s of each phase
+                var rootSet = function (nm, child, on) { for (var q = 0; q < global.scene.getRootObjectsCount(); q++) { var ro = global.scene.getRootObject(q); if (ro.name === nm) { if (child) { for (var w = 0; w < ro.getChildrenCount(); w++) { if (ro.getChild(w).name === child) { ro.getChild(w).enabled = on; } } } else { ro.enabled = on; } } } };
+                var subs = [["ALL content (vfx, beams, halos, models, ambient, SIK visuals, UI)", function (on) { T.perfSet("vfx", on); T.perfSet("beams", on); T.perfSet("glow", on); T.perfSet("models", on); T.perfSet("ambient", on); rootSet("SpectaclesInteractionKit", "[OPTIONAL] Visuals", on); rootSet("RULESHIFT Controls", null, on); }], ["UI (RULESHIFT Controls)", function (on) { rootSet("RULESHIFT Controls", null, on); }], ["lighting", function (on) { rootSet("Lighting", null, on); }], ["ambient sparkles", function (on) { T.perfSet("ambient", on); }], ["end", function () { }]];
+                var t = el - 30, si = Math.floor(t / 40); if (si === subs.length - 1 && abSi >= 0 && abSi !== si) { print("RULESHIFT AB " + subs[abSi][0] + " on " + (abN[0] / Math.max(abT[0], 0.001)).toFixed(2) + " fps, off " + (abN[1] / Math.max(abT[1], 0.001)).toFixed(2) + " fps"); abSi = si; st = 9; subs.forEach(function (x) { x[1](true); }); print("RULESHIFT AB done"); }
+                if (si >= subs.length) { if (st !== 9) { st = 9; subs.forEach(function (x) { x[1](true); }); print("RULESHIFT AB done"); } }
+                else {
+                    var ph2 = Math.floor((t % 40) / 5), isOff = ph2 % 2 === 1, within = (t % 40) % 5;
+                    if (si !== abSi) {
+                        if (abSi >= 0) { print("RULESHIFT AB " + subs[abSi][0] + " on " + (abN[0] / Math.max(abT[0], 0.001)).toFixed(2) + " fps, off " + (abN[1] / Math.max(abT[1], 0.001)).toFixed(2) + " fps"); }
+                        abSi = si; abN = [0, 0]; abT = [0, 0]; abState = -1;
+                    }
+                    if (abState !== (isOff ? 1 : 0)) { abState = isOff ? 1 : 0; subs[si][1](!isOff); }
+                    if (within > 1.5) { abN[abState]++; abT[abState] += d; }
+                }
+            }
+            else if (!script.perfSweep && st === 1 && el > 6) { st = 2; print("RULESHIFT SHOW room-before"); }
+            else if (script.roomPlay && st === 2 && el > 24) { api.activate(); st = 3; stEl = el; print("RULESHIFT SHOW room-play"); }
+            else if (st === 3 && el > stEl + 2.5) { st = 4; stEl = el; T.setFixedStep(0.0001); print("RULESHIFT SHOW room-chase (frozen)"); }   // freeze the sim so a screenshot taken a few seconds later shows this exact frame
+            else if (st === 4 && el > stEl + 15) { T.setFixedStep(0); var n = T.nodes; T.place(2, n[3].pos.add(new vec3(0, n[2].radius + n[3].radius - 0.5, 0))); st = 5; stEl = el; print("RULESHIFT SHOW room-collide"); }
+            else if (st === 5 && T.connections.some(function (c) { return c.rule === "REPEL"; })) { st = 6; stEl = el; print("RULESHIFT SHOW room-flipped"); }
+            else if (st === 6 && el > stEl + 9) { st = 7; T.setFixedStep(0.0001); print("RULESHIFT SHOW room-fled (frozen)"); }
         });
     });
 }
