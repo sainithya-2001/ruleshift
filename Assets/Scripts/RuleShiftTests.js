@@ -1057,6 +1057,73 @@ if (script.runTests) {
         check("27 a beam that would pass through another object bends around it (no overlap with any object)", T.beamClipNow(conns[1]) < 0.0008 && conns.every(function (c) { return T.beamClipNow(c) < 0.0008; }), conns.map(function (c) { return T.beamClipNow(c).toFixed(4); }).join());
         T.deleteNode(blk27); yield 0.3;
         api.reset(); yield 0.3;
+        // 28. Real-object nodes: pinch a real object, pick its name from a short list, and it becomes an immovable anchored node that links and obeys all five rules
+        api.reset(); yield 0.3; api.clearAll(); api.loadRoom(); yield 0.8;
+        api.clearLinks(); var cat28 = 1, lan28 = 2, flo28 = 3, n0_28 = nodes.length;
+        T.place(cat28, new vec3(22, nodes[cat28].pos.y, nodes[cat28].pos.z)); T.place(flo28, new vec3(0, 18, nodes[flo28].pos.z)); yield 0.5;
+        var TURN28 = new vec3(-0.221, -0.2975, -1); TURN28 = TURN28.uniformScale(1 / TURN28.length);   // the ray through the real turntable in the Sunlit Room
+        T.realPinchRay(new vec3(0, 0, 0), TURN28); yield 0.5;
+        var mi28 = api.realMenuInfo(), ui28 = T.realMenuInfo(), lim28 = api.view().halfW / 95;
+        check("28 a pinch on empty space opens the name list: the six names and Cancel", !!mi28 && ui28.shown && ui28.names.join(",") === "Lamp,Table,Plant,Speaker,Turntable,Chair,Cancel", ui28 ? ui28.names.join(",") : "none");
+        check("28 the list sits beside the pinch, inside the view, without covering the pinched point", ui28.rect && Math.abs(ui28.rect.x) + ui28.rect.hw <= lim28 + 0.001 && !(Math.abs(mi28.x - ui28.rect.x) < ui28.rect.hw && Math.abs(mi28.y - ui28.rect.y) < ui28.rect.hh), JSON.stringify(ui28.rect));
+        var t28 = nodes.length; var tn28 = api.chooseReal("Turntable"); yield 0.5;
+        var ti28 = nodes.indexOf(nodes.filter(function (n) { return n.real; })[0]), ri28 = T.realInfo(ti28);
+        check("28 choosing Turntable adds one anchored node with no model, three glow rings and a name tag", nodes.length === t28 + 1 && ri28 && ri28.anchored && !ri28.modelVisible && ri28.rings === 3 && ri28.tag === "Turntable", JSON.stringify(ri28 && { a: ri28.anchored, m: ri28.modelVisible, r: ri28.rings, t: ri28.tag }));
+        check("28 the node is on the pinched point (ray onto the room's depth plane) and the list has closed", nodes[ti28].pos.distance(new vec3(-27.6, -37.2, -125)) < 0.6 && api.realMenuInfo() === null, nodes[ti28].pos.x.toFixed(1) + "," + nodes[ti28].pos.y.toFixed(1) + "," + nodes[ti28].pos.z.toFixed(0));
+        check("28 the Turntable's collision size is its default (15 cm across) and the tag sits above the ring", Math.abs(ri28.radius - 7.5) < 0.01 && ri28.tagY > nodes[ti28].pos.y + ri28.radius, "r " + ri28.radius + " tagY " + ri28.tagY.toFixed(1));
+        // every type has its own default size, and Cancel creates nothing
+        var sizes28 = { Lamp: 16, Table: 40, Plant: 16, Speaker: 10, Turntable: 15, Chair: 30 }, okSz28 = true, bad28 = "";
+        for (var nm28 in sizes28) {
+            T.realPinchRay(new vec3(0, 0, 0), new vec3(0.1, 0.0, -1).uniformScale(1 / new vec3(0.1, 0, -1).length)); yield 0.1;
+            var k28 = api.chooseReal(nm28); yield 0.2; var tk28 = nodes.length - 1, ik28 = T.realInfo(tk28);
+            if (!ik28 || Math.abs(ik28.radius * 2 - sizes28[nm28]) > 0.01 || ik28.tag !== nm28) { okSz28 = false; bad28 += nm28 + " "; }
+            T.deleteNode(tk28); yield 0.2;
+        }
+        check("28 every type creates a node with its default size and its own name tag", okSz28, bad28);
+        var before28 = nodes.length; T.realPinchRay(new vec3(0, 0, 0), new vec3(0.2, 0.1, -1).uniformScale(1 / new vec3(0.2, 0.1, -1).length)); yield 0.1; var cn28 = api.chooseReal(null); yield 0.2;
+        check("28 Cancel creates nothing and closes the list", nodes.length === before28 && api.realMenuInfo() === null && cn28 === null);
+        var sp28 = T.realPinchScreen(new vec2(0.5, 0.06)); yield 0.2; var open28 = api.realMenuInfo() !== null;
+        var sp28b = T.realPinchScreen(new vec2(0.5, 0.06)); yield 0.2;
+        check("28 a press on empty screen opens the list and a second press elsewhere closes it again", sp28 === "menu" && open28 && sp28b !== null && api.realMenuInfo() === null, sp28 + "/" + sp28b);
+        // link and rules
+        var init28 = new vec3(nodes[ti28].pos.x, nodes[ti28].pos.y, nodes[ti28].pos.z);
+        var c28 = T.connect(cat28, ti28, "ATTRACT"); api.toggle(); yield 14;
+        var rest28 = nodes[cat28].radius + nodes[ti28].radius, d28 = nodes[cat28].pos.distance(nodes[ti28].pos);
+        check("28 story: cat-turntable Attract: the cat walks to the real turntable and settles touching it", nodes[cat28].pos.x < 0 && d28 < rest28 + 2 && d28 > rest28 - 2, "dist " + d28.toFixed(1) + " rest " + rest28.toFixed(1) + " cat x " + nodes[cat28].pos.x.toFixed(1));
+        check("28 the turntable has not moved (position and transform)", nodes[ti28].pos.distance(init28) < 1e-6 && nodes[ti28].tr.getLocalPosition().distance(init28) < 1e-6);
+        T.openEditor(c28); yield 0.3; var ed28 = api.editorInfo();
+        check("28 the rule panel opens for the real link", !!ed28 && ed28.rule === "ATTRACT");
+        api.applyEditorRule("REPEL"); yield 5;
+        var dr28 = nodes[cat28].pos.distance(nodes[ti28].pos);
+        check("28 Repel: the cat is pushed away from the real object, which stays put", c28.rule === "REPEL" && dr28 > d28 + 10 && nodes[ti28].pos.distance(init28) < 1e-6, d28.toFixed(1) + " -> " + dr28.toFixed(1));
+        T.closeEditor();
+        api.toggle(); api.reset(); yield 0.3;
+        check("28 Reset keeps the real object (and its link) where it is", nodes.length === n0_28 + 1 && nodes[ti28].real && nodes[ti28].pos.distance(init28) < 1e-6 && c28.active);
+        // Collision Trigger, Transfer and Grow
+        var fl28 = c28.fires || 0; c28.rule = "COLLISION_TRIGGER"; T.place(cat28, init28.add(new vec3(rest28 * 0.8, 10.7, 0))); api.toggle(); yield 1.5;
+        check("28 Collision Trigger: the cat touching the real object fires the link", (c28.fires || 0) > fl28, "fires " + (c28.fires || 0));
+        api.toggle(); api.reset(); yield 0.3;
+        c28.rule = "TRANSFER"; T.place(cat28, init28.add(new vec3(30, 10.7, 0))); api.toggle(); nodes[cat28].vel = new vec3(-40, 0, 0); var v0_28 = nodes[cat28].vel.length; yield 0.3;
+        var vmax28 = 0; for (var q28 = 0; q28 < 25; q28++) { vmax28 = Math.max(vmax28, nodes[cat28].vel.length); yield 0.1; }
+        check("28 Transfer: the real object takes the whole hit, the cat gives up its speed, the object stays put", nodes[cat28].vel.length < v0_28 * 0.35 && nodes[ti28].pos.distance(init28) < 1e-6, "v " + v0_28.toFixed(1) + " -> " + nodes[cat28].vel.length.toFixed(1));
+        api.toggle(); api.reset(); yield 0.3;
+        c28.rule = "GROW"; var r28 = nodes[ti28].radius; T.place(cat28, init28.add(new vec3(rest28 * 0.8, 10.7, 0))); api.toggle(); yield 1.5;
+        check("28 Grow: touching makes the real object's ring (and collision size) grow, still anchored", nodes[ti28].radius > r28 * 1.1 && nodes[ti28].pos.distance(init28) < 1e-6, r28.toFixed(1) + " -> " + nodes[ti28].radius.toFixed(1));
+        api.toggle(); api.reset(); yield 0.3;
+        check("28 Reset also restores the ring size", Math.abs(nodes[ti28].radius - r28) < 0.01);
+        // dragging cannot move it; Connect / Remove work on it like on any node
+        T.pressStart(ti28); nodes[ti28].tr.setLocalPosition(new vec3(0, 0, -125)); yield 0.3; T.pressEnd(ti28, false); yield 0.3;
+        check("28 dragging does not move it: it snaps back", nodes[ti28].pos.distance(init28) < 1e-6 && nodes[ti28].tr.getLocalPosition().distance(init28) < 1e-6);
+        c28.rule = "ATTRACT"; T.tap(ti28); yield 0.2; var si28 = api.selectedInfo();
+        check("28 tapping it selects it (Connect and Remove appear beside the ring)", !!si28 && Math.abs(si28.r - nodes[ti28].radius) < 0.01 && T.selected() === ti28);
+        api.connectSelected(); yield 0.2; T.tap(lan28); yield 0.3; var cl28 = T.connections.filter(function (c) { return c.active && ((c.A === nodes[ti28] && c.B === nodes[lan28]) || (c.B === nodes[ti28] && c.A === nodes[lan28])); });
+        check("28 Connect links it to another object (turntable-lantern)", cl28.length === 1);
+        T.tap(ti28); yield 0.2; var cnt28 = nodes.length, act28 = T.connections.filter(function (c) { return c.active; }).length; api.deleteSelected(); yield 0.3;
+        check("28 Remove deletes the real object, its links and its tag", nodes.length === cnt28 - 1 && T.connections.filter(function (c) { return c.active; }).length === act28 - 2 && nodes.every(function (n) { return !n.real; }), nodes.length + " nodes");
+        T.realPinchRay(new vec3(0, 0, 0), TURN28); yield 0.1; api.chooseReal("Speaker"); yield 0.3;
+        var hadReal28 = nodes.some(function (n) { return n.real; }); api.clearAll(); yield 0.3;
+        check("28 Clear removes real objects too", hadReal28 && nodes.length === 0 && api.realMenuInfo() === null);
+        yield 0.3;
         T.setWorldScale(1); api.clearAll();
 
         api.reset();
@@ -1208,6 +1275,7 @@ if (script.showRoom) {
         });
     });
 }
+
 
 
 

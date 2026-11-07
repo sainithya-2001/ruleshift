@@ -130,10 +130,12 @@ export class RuleShiftControls extends BaseScriptComponent {
     this.buildDelete()
     this.buildEditor()
     this.buildCard()
+    this.buildRealMenu()
 
     this.createEvent("OnStartEvent").bind(() => {
       this.controller.api.onState((st: string) => this.onState(st))
       this.controller.api.setGenerator(snap3DGenerate)
+      this.controller.api.setUiBusyProbe(() => this.menusOpen() || this.palette.enabled)
       print("RULESHIFT Snap3D token: " + (getSnapToken().length > 0 ? "present (local override)" : "absent - imagined objects will fall back to the orb"))
       this.setPalette(false)
       this.closeMenus()
@@ -142,6 +144,7 @@ export class RuleShiftControls extends BaseScriptComponent {
       this.updateToolbarFollow()
       this.updateOutlines()
       this.updateFloating()
+      this.updateRealMenu()
       this.updateEditor()
       this.updateCard()
       this.updateLabelFit()
@@ -718,6 +721,89 @@ export class RuleShiftControls extends BaseScriptComponent {
     this.connectPill.button.onTriggerUp.add(() => this.controller.api.connectSelected())
     this.connectHint = this.makeLabel(this.sceneObject, "ConnectHint", "Tap another object", 50, new vec4(1, 0.95, 0.45, 1), new vec3(0, 0, -70))
     this.connectHint.sceneObject.enabled = false
+  }
+
+  // ---- Real-object list: opens beside a pinch on empty space; one pick anchors a named node on the real object there ----
+  private realRoot: SceneObject
+  private realPills: {name: string; pill: Pill; plate: SceneObject}[] = []
+  private realW = 9
+  private realH = 24
+  private realShown = false
+  private realHeader: Text
+  private realRect: {x: number; y: number; hw: number; hh: number} | null = null
+
+  private buildRealMenu() {
+    const api = this.controller.api
+    const D = 70
+    const names: string[] = api.realTypes().concat(["Cancel"])
+    const pw = 8.4
+    const ph = 2.9
+    const g = 0.3
+    const pad = 0.7
+    const hdr = 2.0
+    const rows = Math.ceil((names.length - 1) / 2) + 1 // two columns of names, then Cancel across the bottom
+    const hh = pad * 2 + hdr + rows * ph + (rows - 1) * g
+    const ww = pw * 2 + g + pad * 2
+    this.realW = ww
+    this.realH = hh
+    this.realRoot = global.scene.createSceneObject("Real Menu")
+    this.realRoot.setParent(this.sceneObject)
+    const pl = api.makePlate("Real Plate", ww, hh, 0.4, new vec3(0, 0, -D - 1.2), MENU_BACK, -8, true)
+    pl.setParent(this.realRoot)
+    this.realHeader = this.makeLabel(this.realRoot, "Real Header", "What is this?", 40, new vec4(1, 1, 1, 1), new vec3(0, hh / 2 - pad - hdr / 2, -D + 0.8))
+    this.realHeader.sceneObject.getTransform().setLocalPosition(new vec3(0, hh / 2 - pad - hdr / 2, -D + 0.8)) // the controls object is offset, so the position is set relative to the menu
+    names.forEach((nm, i) => {
+      const cancel = nm === "Cancel"
+      const row = cancel ? rows - 1 : Math.floor(i / 2)
+      const cx = cancel ? 0 : (i % 2 === 0 ? -1 : 1) * (pw + g) / 2
+      const w = cancel ? pw * 2 + g : pw
+      const cy = hh / 2 - pad - hdr - ph / 2 - row * (ph + g)
+      const bp = api.makePlate("Real Opt " + nm, w, ph, 0.2, new vec3(cx, cy, -D - 0.6), cancel ? new vec4(0.5, 0.16, 0.3, 1) : PILL, -7, true)
+      bp.setParent(this.realRoot)
+      const p = this.makePill(this.realRoot, "Real" + nm, nm, null, new vec3(cx, cy, -D), new vec2(w, ph), 36, true)
+      p.button.onTriggerUp.add(() => api.chooseReal(cancel ? null : nm))
+      this.realPills.push({name: nm, pill: p, plate: bp})
+    })
+    this.realRoot.enabled = false
+    api.test.realMenuInfo = () => ({shown: this.realShown, rect: this.realRect, names: this.realPills.map((r) => r.name), header: this.realHeader.text})
+  }
+
+  private updateRealMenu() {
+    const api = this.controller.api
+    const info = api.realMenuInfo()
+    if (info && (this.menusOpen() || this.palette.enabled)) {
+      api.closeRealMenu()
+      this.realRoot.enabled = false
+      this.realShown = false
+      this.realRect = null
+      return
+    }
+    if (!info) {
+      if (this.realShown) {
+        this.realRoot.enabled = false
+        this.realShown = false
+        this.realRect = null
+      }
+      return
+    }
+    const D = 70
+    const v = api.view()
+    const lim = v.halfW / -Z
+    const hw = this.realW / 2 / D
+    const hh = this.realH / 2 / D
+    const ar = 0.045 // clear of the pinch point itself
+    let cx = info.x + ar + hw
+    if (cx + hw > lim - 0.01) cx = info.x - ar - hw
+    cx = Math.max(-lim + hw + 0.01, Math.min(lim - hw - 0.01, cx))
+    const tbLeft = (this.toolbarCenters[0] - this.pillWidth / 2 - 0.5) / -Z
+    const floorAng = cx + hw > tbLeft ? api.toolbarTop() : -0.31 // clear of the toolbar it may sit lower, down to the bottom of the real view
+    const lo = floorAng + hh + 0.01
+    const hi = v.halfH / -Z - hh - 0.01
+    const cy = Math.max(lo, Math.min(hi, info.y))
+    this.realRoot.getTransform().setWorldPosition(new vec3(cx * D, cy * D, 0))
+    this.realRoot.enabled = true
+    this.realShown = true
+    this.realRect = {x: cx, y: cy, hw: hw, hh: hh}
   }
 
   private connectPlateColor(): number[] {

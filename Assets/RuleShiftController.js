@@ -266,6 +266,7 @@ function deleteNode(n) {
     if (selNode === n) { selNode = null; connectArmed = false; }
     if (pendingPlace === n) { pendingPlace = null; }
     nodes.splice(i, 1);
+    if (n.extra) { n.extra.forEach(function (o) { o.destroy(); }); }
     n.obj.destroy();
     refreshConnections(); updateEmptyHint();
     print("RULESHIFT deleted " + nm + " (" + nodes.length + " left)");
@@ -375,9 +376,107 @@ function placeAtScreen(sp) {
 }
 script.createEvent("TouchStartEvent").bind(function (e) {
     var sp = e.getTouchPosition();
+    var editorWas = !!editorLink;
     if (editorLink && script.camera) { var a = screenToAng(sp); editorTouch(a.x, a.y); }
-    placeAtScreen(sp);
+    if (placeAtScreen(sp) === null && !editorWas) { realPinchAtScreen(sp); }
 });
+
+// ---------- Real-object nodes: pinch a real object in the room, name it from a short list, and it becomes an immovable node ----------
+// The node has no model: a soft glowing ring hugging the real object and a small name tag. It links and obeys every rule like any node, but never moves.
+var REAL_TYPES = [{ name: "Lamp", size: 16 }, { name: "Table", size: 40 }, { name: "Plant", size: 16 }, { name: "Speaker", size: 10 }, { name: "Turntable", size: 15 }, { name: "Chair", size: 30 }];   // default collision size (cm, diameter)
+var REAL_COLOR = new vec4(0.35, 1.0, 0.85, 1);
+var REAL_RING = [[0.475, 0.525, 0.72], [0.43, 0.57, 0.3], [0.35, 0.65, 0.12]];   // inner radius, outer radius (node-local, 0.5 = the collision radius), alpha: three nested additive annuli read as one soft ring
+var realMenu = null, realMenuSeq = 0, uiBusyProbe = null, ringMeshCache = {};
+function screenRay(sp) {
+    var cam = script.camera, o = cam.getTransform().getWorldPosition();
+    var w = cam.screenSpaceToWorldSpace(sp, 100);
+    var d = w.sub(o); d = d.uniformScale(1 / Math.max(d.length, 0.0001));
+    return { o: o, d: d };
+}
+function rayBlocked(o, d) {
+    var blocked = false;
+    try {
+        probe = probe || Physics.createGlobalProbe();
+        probe.rayCast(o, o.add(d.uniformScale(400)), function (hit) { if (hit && hit.collider) { blocked = true; } });
+    } catch (e) { }
+    return blocked;
+}
+function openRealMenu(o, d) {   // a ray from the eye through the pinch: the point is where it crosses the room's depth plane (the sideboard objects stand there); on a device a WorldQuery hit replaces it
+    var t = (spawnPlane() - o.z) / (Math.abs(d.z) > 0.001 ? d.z : -0.001);
+    var pos = o.add(d.uniformScale(Math.max(t, 1)));
+    var dep = Math.max(-pos.z, 1);
+    var m = { pos: pos, ax: pos.x / dep, ay: pos.y / dep, id: ++realMenuSeq };
+    realMenu = m;
+    if (selNode) { selNode = null; connectArmed = false; }
+    if (wqSession) {
+        try { wqSession.hitTest(o, o.add(d.uniformScale(400)), function (r) { if (realMenu === m && r && r.position) { m.pos = new vec3(r.position.x, r.position.y, r.position.z); wqStatus = "hits"; } }); } catch (e) { }
+    }
+    print("RULESHIFT real-object list opened at (" + pos.x.toFixed(1) + ", " + pos.y.toFixed(1) + ", " + pos.z.toFixed(1) + ")");
+}
+function realPinchAtScreen(sp) {   // a press on empty space (no object, button or link under it): opens the name list; a press elsewhere while it is open closes it
+    if (!script.camera) { return null; }
+    var r = screenRay(sp);
+    if (rayBlocked(r.o, r.d)) { return "blocked"; }
+    if (realMenu) { realMenu = null; return "cancelled"; }
+    if (pendingPlace || connectArmed || (uiBusyProbe && uiBusyProbe())) { return null; }
+    openRealMenu(r.o, r.d);
+    return "menu";
+}
+function ringMesh(r0, r1) {
+    var key = r0 + "_" + r1;
+    if (ringMeshCache[key]) { return ringMeshCache[key]; }
+    var N = 48, tris = [], P = function (r, a) { return [Math.cos(a) * r, Math.sin(a) * r, 0]; };
+    for (var i = 0; i < N; i++) {
+        var a0 = 2 * Math.PI * i / N, a1 = 2 * Math.PI * (i + 1) / N;
+        var a = P(r0, a0), b = P(r1, a0), c = P(r1, a1), d = P(r0, a1);
+        tris.push([a, b, c], [a, c, d], [a, c, b], [a, d, c]);   // both windings: visible from either side
+    }
+    return (ringMeshCache[key] = buildMesh(tris));
+}
+function spawnRealNode(name, size, pos) {
+    var n = spawnNode({ shape: "sphere", size: size, color: REAL_COLOR, pos: pos, name: name, shine: false });
+    if (!n) { return null; }
+    n.anchored = true; n.real = true; n.rest = 0;
+    n.parts.forEach(function (pt) { pt.rmv.enabled = false; });   // no model; the collider stays so the node can be tapped, linked and removed
+    n.rings = [];
+    REAL_RING.forEach(function (L, i) {
+        var o = global.scene.createSceneObject("Ring " + i);
+        o.setParent(n.obj); o.layer = n.obj.layer;
+        var v = o.createComponent("Component.RenderMeshVisual");
+        v.mesh = ringMesh(L[0], L[1]); v.mainMaterial = SPHERE_MAT.clone();
+        v.mainPass.blendMode = BlendMode.Add; v.mainPass.depthWrite = false; v.setRenderOrder(-2 + i);
+        n.rings.push({ pass: v.mainPass, a: L[2] });
+    });
+    var tag = makeText("Tag " + name, 72, pos, new vec4(0.85, 1, 0.95, 1));
+    styleCaption(tag.text);
+    tag.text.text = name;
+    n.tag = tag; n.extra = [tag.obj];
+    updateRealVisuals();
+    print("RULESHIFT real object '" + name + "' anchored at (" + pos.x.toFixed(1) + ", " + pos.y.toFixed(1) + ", " + pos.z.toFixed(1) + "), size " + size);
+    return n;
+}
+function updateRealVisuals() {
+    for (var i = 0; i < nodes.length; i++) {
+        var n = nodes[i];
+        if (!n.real) { continue; }
+        var k = 0.88 + 0.12 * Math.sin(elapsed * 2.4 + i);   // a slow breathing glow
+        var sel = n === selNode ? 1.5 : 1;
+        n.rings.forEach(function (R) { var a = Math.min(1, R.a * k * sel); R.pass.baseColor = new vec4(REAL_COLOR.r * a, REAL_COLOR.g * a, REAL_COLOR.b * a, a); });
+        var s = Math.max(1, -n.pos.z / -WORLD_Z);
+        n.tag.tr.setWorldScale(vec3.one().uniformScale(s));
+        n.tag.tr.setWorldPosition(new vec3(n.pos.x, n.pos.y + n.radius + 3.2 * s, n.pos.z + 2));
+    }
+}
+script.api.setUiBusyProbe = function (f) { uiBusyProbe = f; };
+script.api.realTypes = function () { return REAL_TYPES.map(function (t) { return t.name; }); };
+script.api.realMenuInfo = function () { return realMenu ? { x: realMenu.ax, y: realMenu.ay, z: realMenu.pos.z, id: realMenu.id } : null; };
+script.api.closeRealMenu = function () { realMenu = null; };
+script.api.chooseReal = function (name) {   // a list entry picked (anything else, e.g. Cancel, just closes the list)
+    var m = realMenu; realMenu = null;
+    if (!m) { return null; }
+    for (var i = 0; i < REAL_TYPES.length; i++) { if (REAL_TYPES[i].name === name) { return spawnRealNode(name, REAL_TYPES[i].size, m.pos); } }
+    return null;
+};
 
 // ---------- links ----------
 var HALO_SCALE = 1.7;
@@ -484,10 +583,10 @@ function connectSelected() {
 }
 script.api.connectSelected = connectSelected;
 script.api.connectArmed = function () { return connectArmed && !!selNode; };
-function pressStartNode(n) { if (pendingPlace === n) { pendingPlace = null; } n.dragging = true; n.tapT = elapsed; n.tapP = n.tr.getLocalPosition(); }
+function pressStartNode(n) { if (pendingPlace === n) { pendingPlace = null; } n.dragging = !n.anchored; n.tapT = elapsed; n.tapP = n.tr.getLocalPosition(); }
 function pressEndNode(n, allowTap) {
     if (nodeIndex(n) < 0) { return; }
-    n.dragging = false; var p = n.tr.getLocalPosition(); n.pos = new vec3(p.x, p.y, p.z); n.vel = vec3.zero();
+    n.dragging = false; var p = n.anchored ? n.pos : n.tr.getLocalPosition(); n.pos = new vec3(p.x, p.y, p.z); n.vel = vec3.zero(); if (n.anchored) { n.tr.setLocalPosition(n.pos); }
     // only a short press that barely moved counts as a tap-select; drags never do
     if (allowTap && elapsed - n.tapT < 0.35 && p.distance(n.tapP) < 1.5 * K) { handleTapNode(n); }
 }
@@ -558,7 +657,7 @@ function computeForces() {
         var f = 0;
         // every length, speed and force is scaled by K, so a room-scale world is an exact K-times copy of the stage dynamics (same timing, K-times the distance)
         if (c.rule === RULES.ATTRACT) {
-            var rest = A.radius + B.radius + LINK_GAP * gapK();
+            var rest = A.radius + B.radius + ((A.anchored || B.anchored) ? 0 : LINK_GAP * gapK());   // a real object has no model to stand off from: the other settles touching its ring
             f = dist > rest ? script.strength * 30 * K * Math.min(1, (dist - rest) / (10 * K)) : 0;
         } else if (c.rule === RULES.REPEL) {
             f = dist < REPEL_RANGE * repK() ? -script.strength * 60 * K * (1 - dist / (REPEL_RANGE * repK())) - 6 * K : 0;
@@ -584,6 +683,11 @@ function applyGrow(n) {   // size follows growK: visual scale, collision radius 
 }
 function growNode(n) { n.growK = Math.min(GROW_CAP, n.growK * GROW_STEP); applyGrow(n); if (n.growK >= GROW_CAP - 1e-9) { discover("growth", n.obj.name + " at max size"); } }
 function transferVelocity(A, B) {   // Newton's cradle: the faster object hands most of its velocity to the slower one
+    if (A.anchored || B.anchored) {   // an immovable real object takes the whole hit: the mover gives up 90% of its speed
+        var mv = A.anchored ? B : A;
+        if (mv.vel.length < TRANSFER_MIN_SPEED) { return false; }
+        mv.vel = mv.vel.uniformScale(TRANSFER_KEEP); return true;
+    }
     var fast = A.vel.length >= B.vel.length ? A : B, slow = fast === A ? B : A;
     var vf = fast.vel, vs = slow.vel;
     if (vf.length < TRANSFER_MIN_SPEED) { return false; }
@@ -699,6 +803,7 @@ function updatePulses(dt) {
 
 function integrate(dt) {
     nodes.forEach(function (n) {
+        if (n.anchored) { n.vel = vec3.zero(); n.tr.setLocalPosition(n.pos); return; }
         if (n.dragging) { return; }
         n.vel = n.vel.add(n.force.uniformScale(dt * n.accel)).uniformScale(Math.max(0, 1 - DAMPING * dt));
         var sp = n.vel.length;
@@ -714,6 +819,7 @@ function integrate(dt) {
 }
 function syncDragged() {   // a grabbed object owns its position; physics resumes from wherever it is released
     nodes.forEach(function (n) {
+        if (n.anchored) { n.vel = vec3.zero(); n.force = vec3.zero(); n.tr.setLocalPosition(n.pos); return; }   // the Interactable may try to drag it: put it back
         if (!n.dragging) { return; }
         n.pos = clampToBox(n, n.tr.getLocalPosition()); n.vel = vec3.zero(); n.force = vec3.zero();
         n.tr.setLocalPosition(n.pos);
@@ -785,6 +891,7 @@ function updateGoal(dt) {
 var STAGE_R = 23;
 var BOX_X = 17, BOX_YMIN = -16, BOX_YMAX = 8, BOX_Z = 10;   // keeps objects above the buttons and inside the view
 function clampToBox(n, p) {
+    if (n.anchored) { return n.pos; }   // a real-object node never moves
     if (roomMode()) {   // the room volume: floor to ceiling, side to side, and from just in front of the user to the far wall (an object may rest on the floor)
         var r = n.radius;
         return new vec3(Math.max(-(ROOM.x - r), Math.min(ROOM.x - r, p.x)), Math.max(FLOOR_Y + r, Math.min(ROOM.yMax - r, p.y)), Math.max(ROOM.zFar + r, Math.min(ROOM.zNear - r, p.z)));
@@ -805,6 +912,7 @@ function resolveOverlaps(moveDragged) {   // moveDragged: last resort when the o
             var pen = minD - dist;
             var dA = A.dragging && !moveDragged, dB = B.dragging && !moveDragged;
             var wA = dA ? 0 : (dB ? 1 : 0.5), wB = dB ? 0 : (dA ? 1 : 0.5);
+            if (A.anchored || B.anchored) { if (A.anchored && B.anchored) { continue; } wA = A.anchored ? 0 : 1; wB = B.anchored ? 0 : 1; }   // a real object is immovable: only the other one yields
             if (moveDragged && A.dragging !== B.dragging) { wA = A.dragging ? 1 : 0; wB = B.dragging ? 1 : 0; }   // other is pinned: grabbed one yields
             A.pos = A.pos.sub(dir.uniformScale(pen * wA)); B.pos = B.pos.add(dir.uniformScale(pen * wB));
             if (wA > 0) { A.tr.setLocalPosition(A.pos); }
@@ -1359,7 +1467,7 @@ function resetWorld() {   // restores positions; created objects and links are k
         n.growK = 1; applyGrow(n);
         n.tr.setLocalPosition(n.pos);
     });
-    clearCause(); contacts = {}; pendingRewrite = null;
+    clearCause(); contacts = {}; pendingRewrite = null; realMenu = null;
     connections.forEach(function (c) { c.cooldownUntil = 0; c.touching = false; updateVisual(c); });
     selNode = null; connectArmed = false;
     if (goalEnabled) { goalStage = 0; settleTime = 0; goalText.text = GOAL_1; nextText.text = "Next: " + GOAL_2; }
@@ -1368,7 +1476,8 @@ function resetWorld() {   // restores positions; created objects and links are k
 function clearAll() {
     clearCause();
     for (var k = slots.length - 1; k >= 0; k--) { destroySlot(slots[k]); }
-    for (var i = nodes.length - 1; i >= 0; i--) { nodes[i].obj.destroy(); }
+    for (var i = nodes.length - 1; i >= 0; i--) { if (nodes[i].extra) { nodes[i].extra.forEach(function (o) { o.destroy(); }); } nodes[i].obj.destroy(); }
+    realMenu = null;
     nodes.length = 0; refreshConnections(); updateEmptyHint(); resetDiscoveries();
     selNode = null; pendingPlace = null; setGoalEnabled(false);
     setState("creation");
@@ -1538,6 +1647,10 @@ script.api.test = {
     nodes: nodes, connections: connections, slots: slots,
     tap: function (i) { handleTapNode(nodes[i]); },
     pressStart: function (i) { pressStartNode(nodes[i]); },
+    realPinchRay: function (o, d) { openRealMenu(o, d); },
+    realPinchScreen: function (sp) { return realPinchAtScreen(sp); },
+    spawnReal: function (name, size, pos) { return nodes.indexOf(spawnRealNode(name, size, pos)); },
+    realInfo: function (i) { var n = nodes[i]; return n && n.real ? { anchored: !!n.anchored, radius: n.radius, rings: n.rings.length, tag: n.tag.text.text, tagY: n.tag.tr.getWorldPosition().y, modelVisible: n.parts.some(function (p) { return p.rmv.enabled; }), pos: n.pos, trPos: n.tr.getLocalPosition() } : null; },
     pressEnd: function (i, allowTap) { pressEndNode(nodes[i], allowTap); },
     growNode: growNode, applyGrow: applyGrow, GROW_CAP: GROW_CAP,
     discovered: function () { return DISCOVERIES.filter(function (d) { return discovered[d.id]; }).map(function (d) { return d.id; }); },
@@ -1658,7 +1771,7 @@ script.createEvent("UpdateEvent").bind(function (e) {
     updateCause(realDt);
     pm("pulses"); updateRewrite(realDt); updateSparkles(realDt); pm("sparkles"); updateAmbient(realDt); pm("ambient"); updateVfx(); updateModelLife(realDt); pm("life");
     updateImagine(dt);
-    updateSelection();
+    updateSelection(); updateRealVisuals();
     hintObj.enabled = !!pendingPlace && !goalEnabled;
     updateGoal(Math.min(fdt, 0.25));   // real time, so goal timers don't slow down at low frame rates
     placedLabels.length = 0;
