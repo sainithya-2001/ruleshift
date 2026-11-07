@@ -2,6 +2,7 @@ import {Button} from "SpectaclesUIKit.lspkg/Scripts/Components/Button/Button"
 import {ElementContent} from "SpectaclesUIKit.lspkg/Scripts/Components/Content/ElementContent"
 import {snap3DGenerate} from "./Snap3DGenerator"
 import {getSnapToken} from "./Snap3DConfig"
+import {RealVision} from "./RealVision"
 
 const SHAPES = ["sphere", "cube", "crystal", "cone", "torus"]
 const SHAPE_LABELS = ["Orb", "Cube", "Gem", "Cone", "Ring"]
@@ -135,6 +136,15 @@ export class RuleShiftControls extends BaseScriptComponent {
     this.createEvent("OnStartEvent").bind(() => {
       this.controller.api.onState((st: string) => this.onState(st))
       this.controller.api.setGenerator(snap3DGenerate)
+      this.vision.init()
+      if (this.vision.available()) {
+        this.controller.api.setVisionProvider((ax: number, ay: number, cb: (n: string | null, i: any) => void) =>
+          this.vision.name(ax, ay, !!this.controller.api.visionWantCrop, (r) => {
+            print("RULESHIFT vision: " + (r.name ? "'" + r.name + "'" : "no name") + " in " + r.ms + " ms (" + r.why + ")")
+            cb(r.name, r)
+          })
+        )
+      }
       this.controller.api.setUiBusyProbe(() => this.menusOpen() || this.palette.enabled)
       print("RULESHIFT Snap3D token: " + (getSnapToken().length > 0 ? "present (local override)" : "absent - imagined objects will fall back to the orb"))
       this.setPalette(false)
@@ -730,6 +740,8 @@ export class RuleShiftControls extends BaseScriptComponent {
   private realH = 24
   private realShown = false
   private realHeader: Text
+  private vision = new RealVision()
+  private lookObj: SceneObject
   private realRect: {x: number; y: number; hw: number; hh: number} | null = null
 
   private buildRealMenu() {
@@ -764,6 +776,13 @@ export class RuleShiftControls extends BaseScriptComponent {
       p.button.onTriggerUp.add(() => api.chooseReal(cancel ? null : nm))
       this.realPills.push({name: nm, pill: p, plate: bp})
     })
+    this.lookObj = global.scene.createSceneObject("Real Looking")
+    this.lookObj.setParent(this.sceneObject)
+    const lp = api.makePlate("Look Plate", 9, 3.2, 0.4, new vec3(0, 0, -D - 1.2), MENU_BACK, -8, true)
+    lp.setParent(this.lookObj)
+    const ll = this.makeLabel(this.lookObj, "Look Label", "Looking…", 44, new vec4(1, 1, 1, 1), new vec3(0, 0, 0))
+    ll.sceneObject.getTransform().setLocalPosition(new vec3(0, 0, -D + 0.8))
+    this.lookObj.enabled = false
     this.realRoot.enabled = false
     api.test.realMenuInfo = () => ({shown: this.realShown, rect: this.realRect, names: this.realPills.map((r) => r.name), header: this.realHeader.text})
   }
@@ -779,6 +798,7 @@ export class RuleShiftControls extends BaseScriptComponent {
       return
     }
     if (!info) {
+      this.lookObj.enabled = false
       if (this.realShown) {
         this.realRoot.enabled = false
         this.realShown = false
@@ -789,6 +809,18 @@ export class RuleShiftControls extends BaseScriptComponent {
     const D = 70
     const v = api.view()
     const lim = v.halfW / -Z
+    if (info.looking) {   // naming from the camera: a small "Looking…" plate beside the pinch, no list yet
+      this.realRoot.enabled = false
+      this.realShown = false
+      this.realRect = null
+      const lw = 4.7 / D
+      let lx = info.x + 0.045 + lw
+      if (lx + lw > lim - 0.01) lx = info.x - 0.045 - lw
+      this.lookObj.getTransform().setWorldPosition(new vec3(lx * D, Math.max(-0.31, info.y + 0.03) * D, 0))
+      this.lookObj.enabled = true
+      return
+    }
+    this.lookObj.enabled = false
     const hw = this.realW / 2 / D
     const hh = this.realH / 2 / D
     const ar = 0.045 // clear of the pinch point itself

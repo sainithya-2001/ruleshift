@@ -1059,6 +1059,7 @@ if (script.runTests) {
         api.reset(); yield 0.3;
         // 28. Real-object nodes: pinch a real object, pick its name from a short list, and it becomes an immovable anchored node that links and obeys all five rules
         api.reset(); yield 0.3; api.clearAll(); api.loadRoom(); yield 0.8;
+        api.setVisionProvider(null);   // the real provider (Gemini) is installed whenever a token exists; the tests never call it
         api.clearLinks(); var cat28 = 1, lan28 = 2, flo28 = 3, n0_28 = nodes.length;
         T.place(cat28, new vec3(22, nodes[cat28].pos.y, nodes[cat28].pos.z)); T.place(flo28, new vec3(0, 18, nodes[flo28].pos.z)); yield 0.5;
         var TURN28 = new vec3(-0.221, -0.2975, -1); TURN28 = TURN28.uniformScale(1 / TURN28.length);   // the ray through the real turntable in the Sunlit Room
@@ -1124,6 +1125,33 @@ if (script.runTests) {
         var hadReal28 = nodes.some(function (n) { return n.real; }); api.clearAll(); yield 0.3;
         check("28 Clear removes real objects too", hadReal28 && nodes.length === 0 && api.realMenuInfo() === null);
         yield 0.3;
+        // 29. Vision naming for real objects: a provider names the object (else the list), "Looking..." while waiting, 8 s limit, a press elsewhere cancels
+        api.reset(); yield 0.3; api.clearAll(); api.loadRoom(); yield 0.5; api.clearLinks();
+        var D29 = new vec3(-0.221, -0.2975, -1); D29 = D29.uniformScale(1 / D29.length), O29 = new vec3(0, 0, 0), n29 = nodes.length, pend29 = null;
+        api.setVisionProvider(function (ax, ay, cb) { pend29 = cb; });
+        T.realPinchRay(O29, D29); yield 0.3;
+        check("29 with vision the pinch shows 'Looking...' first and no list", api.realMenuInfo() && api.realMenuInfo().looking === true && T.realMenuInfo().shown === false);
+        pend29("Turntable", { why: "stub", ms: 1 }); yield 0.3;
+        var rn29 = nodes.filter(function (n) { return n.real; });
+        check("29 the answer becomes the node's name (default size for a known type) and the wait ends", nodes.length === n29 + 1 && rn29.length === 1 && rn29[0].obj.name === "Turntable" && Math.abs(rn29[0].radius - 7.5) < 0.01 && api.realMenuInfo() === null, rn29.length ? rn29[0].obj.name : "none");
+        T.deleteNode(nodes.indexOf(rn29[0])); yield 0.2;
+        T.realPinchRay(O29, D29); yield 0.2; pend29("Vinyl player", { why: "stub", ms: 1 }); yield 0.3;
+        var rv29 = nodes.filter(function (n) { return n.real; });
+        check("29 an unknown name still makes a node with that name and a middling size", rv29.length === 1 && rv29[0].obj.name === "Vinyl player" && rv29[0].radius === 7, rv29.length ? rv29[0].obj.name + " r " + rv29[0].radius : "none");
+        T.deleteNode(nodes.indexOf(rv29[0])); yield 0.2;
+        T.realPinchRay(O29, D29); yield 0.2; pend29(null, { why: "stub failure", ms: 1 }); yield 0.3;
+        check("29 a failed lookup falls back to the name list", api.realMenuInfo() && api.realMenuInfo().looking === false && T.realMenuInfo().shown === true && nodes.filter(function (n) { return n.real; }).length === 0);
+        api.chooseReal("Lamp"); yield 0.3; T.deleteNode(nodes.length - 1); yield 0.2;
+        T.realPinchRay(O29, D29); yield 5;
+        check("29 still waiting after 5 s: 'Looking...' stays", api.realMenuInfo() && api.realMenuInfo().looking === true);
+        yield 4;
+        check("29 after 8 s without an answer the list appears", api.realMenuInfo() && api.realMenuInfo().looking === false && T.realMenuInfo().shown === true);
+        pend29("Chair", { why: "late", ms: 9000 }); yield 0.3;
+        check("29 a late answer after the list appeared is ignored", nodes.filter(function (n) { return n.real; }).length === 0);
+        api.closeRealMenu(); yield 0.2;
+        T.realPinchRay(O29, D29); yield 0.2; api.closeRealMenu(); pend29("Chair", { why: "cancelled", ms: 1 }); yield 0.3;
+        check("29 an answer arriving after the pinch was cancelled creates nothing", nodes.filter(function (n) { return n.real; }).length === 0 && api.realMenuInfo() === null);
+        api.setVisionProvider(null);
         T.setWorldScale(1); api.clearAll();
 
         api.reset();
@@ -1275,6 +1303,7 @@ if (script.showRoom) {
         });
     });
 }
+
 
 
 

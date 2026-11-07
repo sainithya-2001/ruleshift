@@ -411,6 +411,14 @@ function openRealMenu(o, d) {   // a ray from the eye through the pinch: the poi
     if (wqSession) {
         try { wqSession.hitTest(o, o.add(d.uniformScale(400)), function (r) { if (realMenu === m && r && r.position) { m.pos = new vec3(r.position.x, r.position.y, r.position.z); wqStatus = "hits"; } }); } catch (e) { }
     }
+    if (visionProvider) {   // vision: name the object from a camera crop; the list only appears if that fails or takes over 8 s
+        m.looking = true; m.deadline = elapsed + 8;
+        visionProvider(m.ax, m.ay, function (name, info) {
+            if (realMenu !== m || !m.looking) { return; }
+            script.api.visionLast = info || null;
+            if (name) { realMenu = null; spawnNamedReal(name, m.pos); } else { m.looking = false; print("RULESHIFT vision failed (" + (info && info.why) + "): showing the list"); }
+        });
+    }
     print("RULESHIFT real-object list opened at (" + pos.x.toFixed(1) + ", " + pos.y.toFixed(1) + ", " + pos.z.toFixed(1) + ")");
 }
 function realPinchAtScreen(sp) {   // a press on empty space (no object, button or link under it): opens the name list; a press elsewhere while it is open closes it
@@ -455,7 +463,15 @@ function spawnRealNode(name, size, pos) {
     print("RULESHIFT real object '" + name + "' anchored at (" + pos.x.toFixed(1) + ", " + pos.y.toFixed(1) + ", " + pos.z.toFixed(1) + "), size " + size);
     return n;
 }
+function spawnNamedReal(name, pos) {   // a name from vision: a known type keeps its default size, anything else gets a middling one
+    var size = 14;
+    for (var i = 0; i < REAL_TYPES.length; i++) { if (REAL_TYPES[i].name.toLowerCase() === name.toLowerCase()) { size = REAL_TYPES[i].size; name = REAL_TYPES[i].name; } }
+    return spawnRealNode(name, size, pos);
+}
+var visionProvider = null;
+script.api.setVisionProvider = function (f) { visionProvider = f; };
 function updateRealVisuals() {
+    if (realMenu && realMenu.looking && elapsed > realMenu.deadline) { realMenu.looking = false; print("RULESHIFT vision timed out after 8 s: showing the list"); }
     for (var i = 0; i < nodes.length; i++) {
         var n = nodes[i];
         if (!n.real) { continue; }
@@ -469,7 +485,7 @@ function updateRealVisuals() {
 }
 script.api.setUiBusyProbe = function (f) { uiBusyProbe = f; };
 script.api.realTypes = function () { return REAL_TYPES.map(function (t) { return t.name; }); };
-script.api.realMenuInfo = function () { return realMenu ? { x: realMenu.ax, y: realMenu.ay, z: realMenu.pos.z, id: realMenu.id } : null; };
+script.api.realMenuInfo = function () { return realMenu ? { x: realMenu.ax, y: realMenu.ay, z: realMenu.pos.z, id: realMenu.id, looking: !!realMenu.looking } : null; };
 script.api.closeRealMenu = function () { realMenu = null; };
 script.api.chooseReal = function (name) {   // a list entry picked (anything else, e.g. Cancel, just closes the list)
     var m = realMenu; realMenu = null;
