@@ -1070,6 +1070,8 @@ if (script.runTests) {
         var t28 = nodes.length; var tn28 = api.chooseReal("Turntable"); yield 0.5;
         var ti28 = nodes.indexOf(nodes.filter(function (n) { return n.real; })[0]), ri28 = T.realInfo(ti28);
         check("28 choosing Turntable adds one anchored node with no model, three glow rings and a name tag", nodes.length === t28 + 1 && ri28 && ri28.anchored && !ri28.modelVisible && ri28.rings === 3 && ri28.tag === "Turntable", JSON.stringify(ri28 && { a: ri28.anchored, m: ri28.modelVisible, r: ri28.rings, t: ri28.tag }));
+        var vw28 = api.view(), lx28 = vw28.halfW / 95 * 0.98, ly28 = vw28.halfH / 95 * 0.98;
+        check("28 the whole ring and the name tag are inside the visible view (an object at the view edge gets a ring that hugs its visible part)", ri28.ringBox && ri28.ringBox.x0 >= -lx28 - 0.001 && ri28.ringBox.x1 <= lx28 + 0.001 && ri28.ringBox.y0 >= -ly28 - 0.001 && ri28.ringBox.y1 <= ly28 + 0.001 && ri28.tagAng.y < ly28 && ri28.tagAng.y > ri28.ringBox.y1 - 0.01, JSON.stringify(ri28.ringBox));
         check("28 the node is on the pinched point (ray onto the room's depth plane) and the list has closed", nodes[ti28].pos.distance(new vec3(-27.6, -37.2, -125)) < 0.6 && api.realMenuInfo() === null, nodes[ti28].pos.x.toFixed(1) + "," + nodes[ti28].pos.y.toFixed(1) + "," + nodes[ti28].pos.z.toFixed(0));
         check("28 the Turntable's collision size is its default (15 cm across) and the tag sits above the ring", Math.abs(ri28.radius - 7.5) < 0.01 && ri28.tagY > nodes[ti28].pos.y + ri28.radius, "r " + ri28.radius + " tagY " + ri28.tagY.toFixed(1));
         // every type has its own default size, and Cancel creates nothing
@@ -1303,6 +1305,7 @@ if (script.showRoom) {
         });
     });
 }
+
 
 
 

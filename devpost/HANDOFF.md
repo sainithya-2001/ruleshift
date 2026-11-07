@@ -150,7 +150,7 @@ If a skill or tool tries to install AiPreviewAgent*/Leaf, stop and tell the user
 - A choice creates `spawnRealNode`: an ordinary node (collider, links, selection, Connect/Remove, rule panel) with `anchored = true`, no model, a soft glowing ring (three nested additive annuli, breathing) and an outlined name tag. Default diameters (cm): Lamp 16, Table 40, Plant 16, Speaker 10, Turntable 15, Chair 30.
 - Anchored means: never integrated, never clamped, never pushed (overlaps move only the other node), the Interactable drag is undone every frame, Reset keeps it, Clear and Remove delete it (and its tag). Rules: Attract rest distance has no link gap (the other node settles touching the ring); Transfer gives up 90% of the mover's speed; Grow grows the ring and collision size; Repel and Collision Trigger unchanged.
 - Calibration: the Preview camera frame matches the panel (tan per pixel 0.000416, panel centre x = 823); the real turntable is at angular (-0.221, -0.2975) = (-27.6, -37.2) cm at z -125, the speaker at about (0.2575, -0.2727).
-- Known limits: the turntable ring is cut by the bottom edge of the view (the turntable sits on the edge); the sideboard objects are all at the same depth plane in Preview, so anchoring is by the ray's angular position.
+- Known limits (the ring-clipping limit is fixed, see the review section below): the sideboard objects are all at the same depth plane in Preview, so anchoring is by the ray's angular position.
 
 ## Real-object nodes, step 2 (vision) - token file
 - `Assets/Scripts/googleTokenLocal.ts` (gitignored, local only) holds `export const GOOGLE_TOKEN = ""`; paste the Google token from Lens Studio's Remote Service Gateway Token window between the quotes on line 3. `GoogleConfig.ts` (committed) exposes `getGoogleToken()` (same try/require pattern as Snap3DConfig.ts; "" when the file is missing, project compiles without it). `googleTokenLocal.example.ts` documents the format.
@@ -162,3 +162,8 @@ If a skill or tool tries to install AiPreviewAgent*/Leaf, stop and tell the user
 - Models tried in order: gemini-2.5-flash, then gemini-2.0-flash (2.0 failed in Preview at first call). Measured in Preview: Turntable 3.4 s, Speaker 6.1 s (first run 4.8 s / 4.8 s); the 8 s limit is close to the slow end.
 - Tests use a stub provider (`api.setVisionProvider`), section 29; section 28 clears the provider so tests never call Gemini.
 - The camera frame to angle calibration (0.4164 mrad per pixel, frame centre = view centre) is measured for the Preview; on a device the intrinsics differ, so the crop (generous 360 px) may be off-centre.
+
+## End-to-end review (392/392 tests)
+- Screenshots `devpost/screenshots/review-*.jpg`, default camera, scripted through the UI handlers (room, play, drag lantern into lotus, back to Attract, pinch turntable, cat to turntable, Surprise, Reset, Clear). All eight beats pass.
+- Fix: the ring and tag of a real object are shifted just enough to stay inside 97% of the visible view (`updateRealVisuals`); the collision circle stays on the object. New test in section 28.
+- Observed, not fixed: after the lantern hits the lotus the lotus drifts under the toolbar's left edge; the lantern-lotus beam passes under the toolbar plate; a generated object can be small and partly hidden by beams.

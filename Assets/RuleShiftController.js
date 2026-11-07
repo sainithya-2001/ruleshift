@@ -453,7 +453,7 @@ function spawnRealNode(name, size, pos) {
         var v = o.createComponent("Component.RenderMeshVisual");
         v.mesh = ringMesh(L[0], L[1]); v.mainMaterial = SPHERE_MAT.clone();
         v.mainPass.blendMode = BlendMode.Add; v.mainPass.depthWrite = false; v.setRenderOrder(-2 + i);
-        n.rings.push({ pass: v.mainPass, a: L[2] });
+        n.rings.push({ pass: v.mainPass, a: L[2], obj: o });
     });
     var tag = makeText("Tag " + name, 72, pos, new vec4(0.85, 1, 0.95, 1));
     styleCaption(tag.text);
@@ -470,6 +470,7 @@ function spawnNamedReal(name, pos) {   // a name from vision: a known type keeps
 }
 var visionProvider = null;
 script.api.setVisionProvider = function (f) { visionProvider = f; };
+script.api.getVisionProvider = function () { return visionProvider; };
 function updateRealVisuals() {
     if (realMenu && realMenu.looking && elapsed > realMenu.deadline) { realMenu.looking = false; print("RULESHIFT vision timed out after 8 s: showing the list"); }
     for (var i = 0; i < nodes.length; i++) {
@@ -479,8 +480,18 @@ function updateRealVisuals() {
         var sel = n === selNode ? 1.5 : 1;
         n.rings.forEach(function (R) { var a = Math.min(1, R.a * k * sel); R.pass.baseColor = new vec4(REAL_COLOR.r * a, REAL_COLOR.g * a, REAL_COLOR.b * a, a); });
         var s = Math.max(1, -n.pos.z / -WORLD_Z);
+        // the ring (and the beam end) shift just enough to keep the whole ring inside the visible view: an object at the edge of the view (the turntable on the
+        // sideboard's front edge) gets a ring that hugs its visible part instead of a clipped circle. The collision circle itself stays where the object is.
+        var vw = script.api.view(), dep = Math.max(-n.pos.z, 1), limX = vw.halfW / -WORLD_Z * 0.97, limY = vw.halfH / -WORLD_Z * 0.97, rA = n.radius * 1.15 / dep;
+        var ax = n.pos.x / dep, ay = n.pos.y / dep, dx = 0, dy = 0;
+        if (ax - rA < -limX) { dx = (-limX + rA - ax) * dep; } else if (ax + rA > limX) { dx = (limX - rA - ax) * dep; }
+        if (ay - rA < -limY) { dy = (-limY + rA - ay) * dep; } else if (ay + rA > limY) { dy = (limY - rA - ay) * dep; }
+        var ls = Math.max(n.size * n.growK, 0.001);
+        n.rings.forEach(function (R) { R.obj.getTransform().setLocalPosition(new vec3(dx / ls, dy / ls, 0)); });
+        n.vOff = new vec3(dx / n.growK, dy / n.growK, 0);
+        n.ringBox = { x0: (n.pos.x + dx) / dep - rA, x1: (n.pos.x + dx) / dep + rA, y0: (n.pos.y + dy) / dep - rA, y1: (n.pos.y + dy) / dep + rA };
         n.tag.tr.setWorldScale(vec3.one().uniformScale(s));
-        n.tag.tr.setWorldPosition(new vec3(n.pos.x, n.pos.y + n.radius + 3.2 * s, n.pos.z + 2));
+        n.tag.tr.setWorldPosition(new vec3(n.pos.x + dx, n.pos.y + dy + n.radius * 1.15 + 3.0 * s, n.pos.z + 2));
     }
 }
 script.api.setUiBusyProbe = function (f) { uiBusyProbe = f; };
@@ -1666,7 +1677,7 @@ script.api.test = {
     realPinchRay: function (o, d) { openRealMenu(o, d); },
     realPinchScreen: function (sp) { return realPinchAtScreen(sp); },
     spawnReal: function (name, size, pos) { return nodes.indexOf(spawnRealNode(name, size, pos)); },
-    realInfo: function (i) { var n = nodes[i]; return n && n.real ? { anchored: !!n.anchored, radius: n.radius, rings: n.rings.length, tag: n.tag.text.text, tagY: n.tag.tr.getWorldPosition().y, modelVisible: n.parts.some(function (p) { return p.rmv.enabled; }), pos: n.pos, trPos: n.tr.getLocalPosition() } : null; },
+    realInfo: function (i) { var n = nodes[i]; return n && n.real ? { anchored: !!n.anchored, radius: n.radius, rings: n.rings.length, tag: n.tag.text.text, tagY: n.tag.tr.getWorldPosition().y, modelVisible: n.parts.some(function (p) { return p.rmv.enabled; }), ringBox: n.ringBox, tagAng: { x: n.tag.tr.getWorldPosition().x / Math.max(-n.pos.z, 1), y: n.tag.tr.getWorldPosition().y / Math.max(-n.pos.z, 1) }, pos: n.pos, trPos: n.tr.getLocalPosition() } : null; },
     pressEnd: function (i, allowTap) { pressEndNode(nodes[i], allowTap); },
     growNode: growNode, applyGrow: applyGrow, GROW_CAP: GROW_CAP,
     discovered: function () { return DISCOVERIES.filter(function (d) { return discovered[d.id]; }).map(function (d) { return d.id; }); },
