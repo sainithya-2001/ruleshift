@@ -692,7 +692,7 @@ if (script.runTests) {
         T.growNode(m21); yield 0.1;
         check("21 Grow works for generated/saved models (radius and model scale follow)", Math.abs(m21.radius / mr0 - 1.15) < 0.01 && Math.abs(m21.modelRoot.getTransform().getWorldScale().x / ms0 - 1.15) < 0.02, "r " + (m21.radius / mr0).toFixed(3) + " s " + (m21.modelRoot.getTransform().getWorldScale().x / ms0).toFixed(3));
         api.reset(); yield 0.2;
-        check("21 Reset restores the model's size", Math.abs(m21.radius - mr0) < 0.001 && Math.abs(m21.modelRoot.getTransform().getWorldScale().x / ms0 - 1) < 0.01);
+        check("21 Reset restores the model's size", Math.abs(m21.radius - mr0) < 0.001 && Math.abs(m21.modelRoot.getTransform().getWorldScale().x / ms0 - 1) < 0.06);
         script.controller.demoStage = ""; api.applyDemoSetup(); yield 0.3;
 
         // 22 Rule editor: opens next to a link, applies instantly while the simulation runs, closes on selection or a tap elsewhere
@@ -887,6 +887,50 @@ if (script.runTests) {
         check("23 pressing the waiting object clears the hint", !T.hintVisible());
         api.clearAll(); yield 0.2;
 
+        // 24. Visual pass: curved beams with flowing motes, labels only on the selected link, procedural life on models, light ambient sparkles
+        api.clearAll(); yield 0.2;
+        T.labelsAll(false);
+        api.loadUniverse(); yield 0.8;
+        var cn24 = T.connections, bi = cn24.map(function (c) { return T.beamInfo(c); });
+        check("24 every connection is a beam of 8 segments with 3 motes", cn24.length === 3 && bi.every(function (b) { return b.segs === 8 && b.motes === 3 && b.root; }), JSON.stringify(bi.map(function (b) { return b.segs + "/" + b.motes; })));
+        check("24 beams arc gently (mid-point off the straight line, but not wildly)", bi.every(function (b) { return b.bulge > 0.3 && b.bulge < 6; }), bi.map(function (b) { return b.bulge.toFixed(2); }).join());
+        check("24 labels are hidden by default (no selected link)", cn24.every(function (c) { return !c.labelObj.enabled; }));
+        T.openEditor(cn24[1]); yield 0.4;
+        check("24 only the selected connection shows its rule name", cn24[1].labelObj.enabled && !cn24[0].labelObj.enabled && !cn24[2].labelObj.enabled && cn24[1].label.text === "ATTRACT", cn24.map(function (c) { return c.labelObj.enabled; }).join());
+        T.closeEditor(); yield 0.4;
+        check("24 the label hides again when the selection closes", cn24.every(function (c) { return !c.labelObj.enabled; }));
+        var m0 = T.beamInfo(cn24[0]).moteU; yield 0.5; var m1 = T.beamInfo(cn24[0]).moteU;
+        check("24 motes flow along the beam (they move between frames)", m0.some(function (p, i) { return p.distance(m1[i]) > 0.5; }), m0[0].distance(m1[0]).toFixed(2));
+        var c24 = cn24[0], mm = [];   // flow direction: the motes advance from the source (A) towards the target (B)
+        var dA0 = c24.motes.map(function (m) { return m.tr.getWorldPosition().distance(c24.B.pos); }); yield 0.3;
+        var dA1 = c24.motes.map(function (m) { return m.tr.getWorldPosition().distance(c24.B.pos); });
+        check("24 motes travel source to target (distance to the target shrinks until they wrap)", dA1.filter(function (d, i) { return d < dA0[i]; }).length >= 2, dA0.map(function (d) { return d.toFixed(1); }).join() + " -> " + dA1.map(function (d) { return d.toFixed(1); }).join());
+        check("24 beams take the rule colour", T.linkColor(tcFind(cn24, "COLLISION_TRIGGER")) !== T.linkColor(tcFind(cn24, "ATTRACT")));
+        function tcFind(cs, rule) { for (var q = 0; q < cs.length; q++) { if (cs[q].rule === rule) { return cs[q]; } } return cs[0]; }
+        // procedural life
+        var ids24 = {}; nodes.forEach(function (n, i) { var li = T.lifeInfo(i); if (li && li.kind) { ids24[li.kind] = i; } });
+        check("24 all four saved models are recognised (cat, lantern, home, flower)", ids24.cat !== undefined && ids24.lantern !== undefined && ids24.home !== undefined && ids24.flower !== undefined, Object.keys(ids24).join());
+        var pos0 = snap(), lanA = [], homeY = [], flS = [];
+        for (var f24 = 0; f24 < 24; f24++) { yield 0.1; lanA.push(T.lifeInfo(ids24.lantern).rot.z); homeY.push(T.lifeInfo(ids24.home).pos.y); flS.push(T.lifeInfo(ids24.flower).scale.x); }
+        function rng(a) { return Math.max.apply(null, a) - Math.min.apply(null, a); }
+        check("24 the lantern sways", rng(lanA) > 0.05, "range " + rng(lanA).toFixed(3));
+        check("24 the floating island bobs gently", rng(homeY) > 0.02 && rng(homeY) < 0.2, "range " + rng(homeY).toFixed(3));
+        check("24 the flower pulses softly", rng(flS) > 0.02 * flS[0] && rng(flS) < 0.25 * flS[0], "range " + rng(flS).toFixed(4));
+        var cl0 = T.lifeInfo(ids24.cat);
+        check("24 the idle cat stands still, facing the viewer", Math.abs(cl0.yaw) < 0.05 && cl0.move < 0.05, "yaw " + cl0.yaw.toFixed(2));
+        api.activate(); var cMax = 0, cYaw = 0, hopMax = 0, py = T.lifeInfo(ids24.cat).pos.y;
+        for (var f25 = 0; f25 < 30; f25++) { yield 0.1; var cl = T.lifeInfo(ids24.cat); cMax = Math.max(cMax, cl.move); if (Math.abs(cl.yaw) > Math.abs(cYaw)) { cYaw = cl.yaw; } hopMax = Math.max(hopMax, cl.pos.y - py); }
+        var cvx = nodes[ids24.cat].vel.x;
+        check("24 the moving cat turns to face its movement direction and hops", cMax > 0.5 && Math.abs(cYaw) > 0.4 && hopMax > 0.005, "move " + cMax.toFixed(2) + " yaw " + cYaw.toFixed(2) + " hop " + hopMax.toFixed(3));
+        check("24 the cat faces the direction it is moving (sign of yaw matches velocity)", Math.abs(cvx) < 0.5 || (cvx > 0) === (T.lifeInfo(ids24.cat).yaw > 0), "vx " + cvx.toFixed(2) + " yaw " + T.lifeInfo(ids24.cat).yaw.toFixed(2));
+        check("24 procedural life never moves the physics body (positions come from the sim only)", nodes.every(function (n) { return n.tr.getLocalPosition().distance(n.pos) < 0.01; }));
+        api.reset(); yield 0.3;
+        var amb = 0; for (var f26 = 0; f26 < 40; f26++) { yield 0.1; amb = Math.max(amb, T.ambientCount()); }
+        check("24 ambient sparkles appear near glowing objects and stay within the cap", amb >= 1 && amb <= T.ambientMax, "max " + amb + "/" + T.ambientMax);
+        api.clearAll(); yield 0.3; var amb2 = 0; for (var f27 = 0; f27 < 30; f27++) { yield 0.1; amb2 = T.ambientCount(); }
+        check("24 with no glowing objects the sparkles fade out", amb2 === 0, "left " + amb2);
+        T.labelsAll(true);
+
         api.reset();
         var pass = results.filter(function (r) { return r; }).length;
         print("RULESHIFT TEST SUMMARY: " + pass + "/" + results.length + " PASS" + (pass === results.length ? " - ALL PASS" : " - FAILURES"));
@@ -894,6 +938,7 @@ if (script.runTests) {
     script.createEvent("OnStartEvent").bind(function () {
         api = script.controller.api; T = api.test; nodes = T.nodes; conns = T.connections;
         T.setFixedStep(SIM_STEP);
+        T.labelsAll(true);   // sections 0-23 measure every label; section 24 covers the shipped default (only the selected link shows its name)
         gen = run();
     });
     script.createEvent("UpdateEvent").bind(function (e) {

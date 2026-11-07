@@ -30,7 +30,7 @@ A **universe** preset shows the idea: four saved Snap3D models (house, cat, lant
 - A small hand-written physics loop in JavaScript: forces summed per link, integrated per node, with a stage boundary, overlap resolution and edge-triggered collision detection.
 - A pooled pulse system for the cause chains, and per-frame label placement that nudges link labels off objects.
 - Snap3D through the Remote Service Gateway package. The token lives in a gitignored local file; a fresh clone compiles and runs without one and falls back to the placeholder orb.
-- A self-driving test harness inside the Lens itself (290 checks at the time of writing) that spawns, links, drags, fires collisions and reads back state, which we ran after every change. It runs on a fixed simulation clock so results do not depend on how slowly Preview runs. Everything was verified in Lens Studio's Preview only.
+- A self-driving test harness inside the Lens itself (308 checks at the time of writing) that spawns, links, drags, fires collisions and reads back state, which we ran after every change. It runs on a fixed simulation clock so results do not depend on how slowly Preview runs. Everything was verified in Lens Studio's Preview only.
 
 ## Challenges
 
