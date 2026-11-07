@@ -30,8 +30,9 @@ const DARK = new vec4(0.12, 0.14, 0.27, 1) // additive display: pure black would
 const PILL = new vec4(0.12, 0.3, 0.8, 1) // saturated blue: stays legible against bright rooms
 const WHITE = new vec4(1, 1, 1, 1)
 const MENU_BACK = new vec4(0.2, 0.26, 0.56, 1) // menu backing: as bright as a dark plate can be on an additive display, so the room behind is lifted and reads as quiet
-const TB_PILL = new vec4(0.12, 0.3, 0.8, 0.6) // toolbar pills: lower opacity so the room (the sideboard) stays visible through them
-const TB_DARK = new vec4(0.12, 0.14, 0.27, 0.12)
+const TB_PILL = new vec4(0.12, 0.3, 0.8, 0.88) // toolbar pills: lower opacity so the room (the sideboard) stays visible through them
+const TB_DARK = new vec4(0.12, 0.14, 0.27, 0.0)
+const TOOLBAR_RIGHT_ANG = 0.2286 // the toolbar ends here (angular): just left of the Sunlit Room sideboard's right speaker, so no pill sits over it
 const ACCENT = new vec4(0.1, 0.55, 1.0, 1)
 const ARMED = new vec4(0.35, 0.92, 1.0, 1) // Connect armed: a bright cyan fill, clearly different from the blue pills
 
@@ -183,15 +184,15 @@ export class RuleShiftControls extends BaseScriptComponent {
     const defs = [
       {label: "Create", icon: this.iconAdd},
       {label: "Play", icon: this.iconPlay},
-      {label: "…", icon: null as Texture | null},
+      {label: "•••", icon: null as Texture | null},
     ]
-    const gap = 0.5
+    const gap = 0.4
     const statusH = 2.2 // a thin band above the pills for the Building / Running / Paused indicator
-    const pw = 5.8
+    const pw = 4.8
     this.pillWidth = pw
     this.pillH = h
     const total = pw * 3 + gap * 2
-    const x0 = this.halfW - 0.5 - total // low in the bottom-right corner, clear of the sideboard objects (the room's centre and left stay free)
+    const x0 = Math.min(this.halfW - 0.3, TOOLBAR_RIGHT_ANG * -Z) - total // low in the bottom-right corner, left of the sideboard's right speaker and clear of the lotus
     const y = -this.halfH + 0.6 + h / 2
     this.toolbarRoot = global.scene.createSceneObject("Toolbar Root")
     const plateH = h + 1.0 + statusH
@@ -206,7 +207,7 @@ export class RuleShiftControls extends BaseScriptComponent {
       const cx = x + pw / 2
       const pl = api.makePlate("Pill " + d.label, pw, h, 0.4, new vec3(cx, y, Z - 0.8), TB_PILL, -7)
       pl.setParent(this.toolbarRoot)
-      pills.push(this.makePill(this.toolbarRoot, "Pill" + i, d.label, d.icon, new vec3(cx, y, Z + 0.5), new vec2(pw, h), TOOLBAR_TEXT_PROBE, false, 1.9, true))
+      pills.push(this.makePill(this.toolbarRoot, "Pill" + i, d.label, d.icon, new vec3(cx, y, Z + 0.5), new vec2(pw, h), TOOLBAR_TEXT_PROBE, false, 1.9, d.icon !== null))
       this.toolbarLabels.push(d.label)
       this.toolbarCenters.push(cx)
       x += pw + gap
@@ -454,7 +455,7 @@ export class RuleShiftControls extends BaseScriptComponent {
       boxes.forEach((b) => (size = Math.min(size, Math.floor(TOOLBAR_TEXT_PROBE * 0.92 * Math.min(allowed / b.w, allowedH / b.h)))))
       size = Math.max(TOOLBAR_TEXT_MIN, size)
       this.labelTextSize = size
-      this.toolbarPills.forEach((p, i) => (p.content.textSize = this.toolbarLabels[i] === "…" ? Math.min(Math.round(size * 1.3), Math.floor(TOOLBAR_TEXT_PROBE * 0.97 * allowedH / boxes[i].h)) : size)) // larger, but never taller than the pill allows // the lone ellipsis glyph is tiny at word size
+      this.toolbarPills.forEach((p, i) => (p.content.textSize = this.toolbarLabels[i] === "•••" ? Math.min(Math.round(size * 1.3), Math.floor(TOOLBAR_TEXT_PROBE * 0.97 * allowedH / boxes[i].h)) : size)) // larger, but never taller than the pill allows // the lone ellipsis glyph is tiny at word size
       this.fitStage = 1
       this.fitFrame = 0 // re-measure a few frames later, once the new size has laid out
       return
@@ -964,7 +965,7 @@ export class RuleShiftControls extends BaseScriptComponent {
       row.pill.button.sceneObject.getTransform().setLocalPosition(new vec3(lx, ly, 0.5))
       const sel = row.rule === info.rule
       row.pill.content.text = (sel ? "✓ " : "") + row.name // the current rule is marked
-      const k = sel ? 0.9 : 0.42 // the current rule is bright and outlined; the others are dimmed versions of their colours
+      const k = sel ? 1.0 : 0.72 // the current rule is bright and outlined; the others are dimmed versions of their colours
       row.fill.getTransform().setWorldPosition(new vec3(c.x + lx, c.y + ly, c.z - 0.6))
       row.border.getTransform().setWorldPosition(new vec3(c.x + lx, c.y + ly, c.z - 0.9))
       row.border.enabled = sel

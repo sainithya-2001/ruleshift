@@ -895,7 +895,7 @@ function updateLabel(c) {
     var shown = labelsAll || (editorLink === c && !roomMode());   // room: the open rule panel already names the rule, so no floating label
     c.labelObj.enabled = shown && c.active;
     if (!shown) { c.lblRect = null; c.labelNudge = 0; return; }
-    var A = c.A.pos, B = c.B.pos;
+    var A = endOf(c.A), B = endOf(c.B);
     if (roomMode()) { placeRoomLabel(c, A, B); return; }
     var mid = A.add(B).uniformScale(0.5);
     var toCam = mid.uniformScale(-1 / Math.max(mid.length, 0.01));   // camera is at the origin
@@ -917,6 +917,7 @@ function updateLabel(c) {
     var k = RULE_COLOR[c.rule];
     c.label.textFill.color = new vec4(k.r, k.g, k.b, labelAlpha);
 }
+function endOf(n) { return n.vOff && roomMode() ? n.pos.add(n.vOff.uniformScale(n.growK)).add(new vec3(0, 0, n.radius * 0.5)) : n.pos; }   // where a beam attaches: the visual centre of the model (cat body, lotus centre), not the collision sphere centre
 function beamPoint(A, C, B, u) { var a = (1 - u) * (1 - u), b = 2 * u * (1 - u), d = u * u; return new vec3(A.x * a + C.x * b + B.x * d, A.y * a + C.y * b + B.y * d, A.z * a + C.z * b + B.z * d); }
 var ARC_SIMILAR = 0.77;   // cos 40 deg: two beams leaving one node closer than this in direction would run along each other
 function arcTarget(c) {   // signed arc height multiplier (presentation only): beams that leave a node in similar directions arc to opposite sides, taller, so they read as separate
@@ -962,7 +963,7 @@ function routeArc(c, pref, A, B, perp, dist) {   // presentation only: keep the 
 }
 function updateVisual(c) {
     if (!perf.beams) { return; }
-    var A = c.A.pos, B = c.B.pos;
+    var A = endOf(c.A), B = endOf(c.B);
     var delta = B.sub(A);
     var dist = Math.max(delta.length, 0.01);
     var dir = delta.uniformScale(1 / dist);
@@ -1055,7 +1056,8 @@ function updateVfx() {
     if (!perf.vfx) { if (script.embersVfx) { script.embersVfx.enabled = false; } if (script.sparklesVfx) { script.sparklesVfx.enabled = false; } return; }
     var lan = null, flo = null;
     nodes.forEach(function (n) { var k = n.modelRoot ? modelKind(n) : null; if (k === "lantern") { lan = n; } else if (k === "flower") { flo = n; } });
-    [[script.embersVfx, lan, 0.1], [script.sparklesVfx, flo, 0.4]].forEach(function (e) {
+    if (script.sparklesVfx && script.sparklesVfx.enabled) { script.sparklesVfx.enabled = false; }   // the stock white-star Sparkles VFX wandered to the view edge as a stray star; the pink motes of the ambient sparkles stay
+    [[script.embersVfx, lan, 0.1]].forEach(function (e) {
         var o = e[0], n = e[1]; if (!o) { return; }
         if (o.enabled !== !!n) { o.enabled = !!n; }
         if (n) { var t = o.getTransform(); t.setWorldPosition(n.pos.add(new vec3(0, n.radius * e[2], 0.5 * K))); t.setWorldScale(vec3.one().uniformScale(n.radius / 12)); }
@@ -1237,6 +1239,7 @@ var EDITOR = { d: 85, pillW: 8.0, pillH: 3.0, gap: 0.4, pad: 0.6, layouts: [] };
     var rows = Math.ceil(ALL_RULES.length / cols);
     EDITOR.layouts.push({ cols: cols, rows: rows, w: cols * EDITOR.pillW + (cols - 1) * EDITOR.gap + 2 * EDITOR.pad, h: rows * EDITOR.pillH + (rows - 1) * EDITOR.gap + 2 * EDITOR.pad });
 });
+var EDITOR_COLOR = { ATTRACT: [1.0, 0.42, 0.0], REPEL: [0.05, 0.5, 1.0], COLLISION_TRIGGER: [0.72, 0.15, 1.0], TRANSFER: [0.05, 0.85, 0.2], GROW: [1.0, 0.2, 0.62] };   // the rule panel: fully saturated
 var EDITOR_NAMES = { ATTRACT: "Attract", REPEL: "Repel", COLLISION_TRIGGER: "Collision Trigger", TRANSFER: "Transfer", GROW: "Grow" };
 var EDITOR_GRACE = 0.3, EDITOR_MARGIN = 0.9, EDITOR_STEP = 1.5, EDITOR_STICK = 1.5;   // cm: gap kept to everything / scan step / how much worse the current spot may be before it moves
 var editorLink = null, editorRect = null, editorOpenedAt = 0, toolbarTopAng = -10;
@@ -1269,9 +1272,9 @@ function editorTouch(ax, ay) {   // a press at angular (ax, ay): outside the pan
     closeEditor("tap elsewhere");
     return true;
 }
-function editorObstacles(withNodes, skipCard) {   // everything the panel must keep clear of, in angular space
+function editorObstacles(withNodes, skipCard, nodeScale) {   // everything the panel must keep clear of, in angular space
     var out = { discs: [], rects: [] };
-    if (withNodes) { nodes.forEach(function (n) { var nd = Math.max(-n.pos.z, 1); out.discs.push({ x: n.pos.x / nd, y: n.pos.y / nd, r: n.radius / nd }); }); }
+    if (withNodes) { nodes.forEach(function (n) { var nd = Math.max(-n.pos.z, 1); out.discs.push({ x: n.pos.x / nd, y: n.pos.y / nd, r: n.radius * (nodeScale || 1) / nd }); }); }
     placedLabels.forEach(function (r) { out.rects.push(r); });
     [pillRect, testPill, skipCard ? null : cardRect].forEach(function (r) { if (r) { out.rects.push(r); } });
     return out;
@@ -1294,29 +1297,31 @@ function updateEditor() {
     var c = editorLink;
     if (!c.active || slots.indexOf(c) < 0) { closeEditor("link removed"); return; }
     var v = script.api.view();
-    var A = c.A.pos, B = c.B.pos, pts = [];
-    for (var k = 0; k <= 4; k++) { var q = A.add(B.sub(A).uniformScale(k / 4)), qd = Math.max(-q.z, 1); pts.push({ x: q.x / qd, y: q.y / qd }); }
-    var mx = pts[2].x, my = pts[2].y;
+    var A = endOf(c.A), B = endOf(c.B), pts = [], Cc = c.arcC || A.add(B).uniformScale(0.5);
+    for (var k = 0; k <= 12; k++) { var q = beamPoint(A, Cc, B, k / 12), qd = Math.max(-q.z, 1); pts.push({ x: q.x / qd, y: q.y / qd }); }   // the link as drawn (its arc), so the panel can stay off it
+    var mx = pts[6].x, my = pts[6].y;
     function cost(cx, cy, hw, hh) {   // distance to the link's middle, heavily penalised when the panel would cover the link itself
         var cv = 0;
-        for (var i = 0; i < pts.length; i++) { if (Math.abs(pts[i].x - cx) < hw && Math.abs(pts[i].y - cy) < hh) { cv = 0.5; break; } }
+        for (var i = 0; i < pts.length; i++) { if (Math.abs(pts[i].x - cx) < hw + 0.012 && Math.abs(pts[i].y - cy) < hh + 0.012) { cv = 0.5; break; } }
         return Math.sqrt((cx - mx) * (cx - mx) + (cy - my) * (cy - my)) + cv;
     }
     var ob = editorObstacles(true), ob2 = null, step = EDITOR_STEP / EDITOR.d;
     var best = null, bestCost = 1e9, overlap = false;
-    function scan(obs) {
+    function scan(obs, only) {
         EDITOR.layouts.forEach(function (L, li) {
+            if (only !== undefined && li !== only) { return; }
             var hw = L.w / 2 / EDITOR.d, hh = L.h / 2 / EDITOR.d;
             for (var gy = -v.halfH / 95 + hh; gy <= v.halfH / 95 - hh + 1e-6; gy += step) {
                 for (var gx = -v.halfW / 95 + hw; gx <= v.halfW / 95 - hw + 1e-6; gx += step) {
                     var cc = cost(gx, gy, hw, hh);
-                    if (cc >= bestCost) { continue; }
+                    if (cc >= bestCost || (only !== undefined && cc >= 0.5)) { continue; }   // preferred pass: never over the link it edits
                     if (!editorBlocked(gx, gy, hw, hh, obs, EDITOR_MARGIN)) { best = { x: gx, y: gy, li: li, hw: hw, hh: hh }; bestCost = cc; }
                 }
             }
         });
     }
-    scan(ob);
+    scan(editorObstacles(true, false, roomMode() ? 0.62 : 1), 0);   // a single narrow column beside the link, off the beam (the visible models are smaller than their bounding spheres, so the first pass tolerates a little overlap with those)
+    if (!best) { scan(ob); }
     if (!best) { ob2 = editorObstacles(false); scan(ob2); overlap = !!best; }   // crowded: keep clear of labels and the toolbar at least
     if (!best) {
         var L0 = EDITOR.layouts[1], h0 = L0.w / 2 / EDITOR.d, k0 = L0.h / 2 / EDITOR.d;
@@ -1334,7 +1339,7 @@ script.api.setToolbarTop = function (ang) { toolbarTopAng = ang; };
 script.api.toolbarTop = function () { return tbTop(); };
 function tbTop() { return roomMode() ? Math.max(toolbarTopAng, SIDEBOARD_TOP) : toolbarTopAng; }   // room: floating panels also stay above the sideboard line (the sideboard strip is where the objects stand)
 script.api.editorSpec = EDITOR;
-script.api.editorRules = function () { return ALL_RULES.map(function (r) { var k = RULE_COLOR[r]; return { rule: r, name: EDITOR_NAMES[r], color: [k.r, k.g, k.b] }; }); };
+script.api.editorRules = function () { return ALL_RULES.map(function (r) { var k = EDITOR_COLOR[r]; return { rule: r, name: EDITOR_NAMES[r], color: [k[0], k[1], k[2]] }; }); };
 script.api.editorInfo = function () { return editorLink && editorRect ? { x: editorRect.x, y: editorRect.y, rule: editorLink.rule, layout: editorRect.li } : null; };
 script.api.applyEditorRule = applyEditorRule;
 script.api.closeEditor = function () { closeEditor("closed"); };
@@ -1424,9 +1429,9 @@ script.api.loadUniverse = loadUniverse;
 // drag the lantern into the flower and the collision's pulse flips cat-lantern to REPEL, so the cat flees back toward the house. Nothing collides by itself.
 var ROOM_LAYOUT = {   // hero sizes 20-40 cm; centres in cm, all about 1.25 m out, inside the default Preview view (+-36 cm wide, -24..+41 cm tall at that depth, above the toolbar); table-resting items sit on FLOOR_Y (the virtual table)
     home: { size: 28, x: -21, y: 24, z: -125 },        // floating island house, high on the left, behind the cat on the side away from the lantern
-    cat: { size: 26, x: -22, y: null, z: -125 },       // standing on the sideboard, left
+    cat: { size: 22, x: -25, y: null, z: -125 },       // standing on the sideboard, left
     lantern: { size: 22, x: 16, y: 10, z: -125 },      // floating above the sideboard, right of centre
-    flower: { size: 24, x: 4, y: null, z: -125 }       // standing on the sideboard, centre (the toolbar is low in the far right corner)
+    flower: { size: 20, x: -3.5, y: null, z: -125 }       // standing on the sideboard, centre (the toolbar is low in the far right corner)
 };
 function loadRoom() {
     clearAll();
@@ -1550,7 +1555,7 @@ script.api.test = {
     editorRect: function () { return editorRect; },
     editorOverlaps: function () {   // how many things the placed panel covers (nodes, labels, Delete pill) plus whether it leaves the view / touches the toolbar
         if (!editorRect) { return -1; }
-        var ob = editorObstacles(true), r = editorRect, n = 0, v = script.api.view();
+        var ob = editorObstacles(true, false, roomMode() ? 0.62 : 1), r = editorRect, n = 0, v = script.api.view();
         ob.discs.forEach(function (d) { var dx = Math.max(Math.abs(r.x - d.x) - r.hw, 0), dy = Math.max(Math.abs(r.y - d.y) - r.hh, 0); if (dx * dx + dy * dy < d.r * d.r) { n++; } });
         ob.rects.forEach(function (o) { if (Math.abs(r.x - o.x) < r.hw + o.hw && Math.abs(r.y - o.y) < r.hh + o.hh) { n++; } });
         if (Math.abs(r.x) + r.hw > v.halfW / 95 || r.y + r.hh > v.halfH / 95 || r.y - r.hh < tbTop()) { n++; }
@@ -1586,9 +1591,9 @@ script.api.test = {
     place: function (i, v) { var n = nodes[i]; n.pos = new vec3(v.x, v.y, v.z); n.vel = vec3.zero(); n.tr.setLocalPosition(n.pos); if (pendingPlace === n) { pendingPlace = null; } },
     connect: function (i, j, rule) { var c = slotFor(nodes[i], nodes[j], true); if (!c.active) { activateLink(c, rule || RULES.ATTRACT, true); } return c; },
     labelInfo: function (c) { var e = labelExtent(c); var p = c.labelTr.getWorldPosition(); return { ext: e, nudge: c.labelNudge, y: p.y, hits: e ? labelHitsNode(p, e, c) : null }; },
-    labelToMid: function (c) { var C = c.arcC || c.A.pos.add(c.B.pos).uniformScale(0.5), M = beamPoint(c.A.pos, C, c.B.pos, 0.5), e = labelExtent(c), p = c.labelTr.getWorldPosition(); if (!e) { return -1; } var dx = p.x + e.ox - M.x, dy = p.y + e.oy - M.y; return Math.sqrt(dx * dx + dy * dy); },
+    labelToMid: function (c) { var C = c.arcC || endOf(c.A).add(endOf(c.B)).uniformScale(0.5), M = beamPoint(endOf(c.A), C, endOf(c.B), 0.5), e = labelExtent(c), p = c.labelTr.getWorldPosition(); if (!e) { return -1; } var dx = p.x + e.ox - M.x, dy = p.y + e.oy - M.y; return Math.sqrt(dx * dx + dy * dy); },
     visualBottom: function (i) { var n = nodes[i], b = n && n.modelRoot ? worldBounds(n.modelRoot) : null; return b ? b.min.y : null; },
-    beamClipNow: function (c) { var A = c.A.pos, B = c.B.pos, d = B.sub(A), dist = Math.max(d.length, 0.01), dir = d.uniformScale(1 / dist); return beamClip(c, c.arcAmt === undefined ? 1 : c.arcAmt, A, B, new vec3(-dir.y, dir.x, 0), dist); },
+    beamClipNow: function (c) { var A = endOf(c.A), B = endOf(c.B), d = B.sub(A), dist = Math.max(d.length, 0.01), dir = d.uniformScale(1 / dist); return beamClip(c, c.arcAmt === undefined ? 1 : c.arcAmt, A, B, new vec3(-dir.y, dir.x, 0), dist); },
     beamClip: function (c) { return c.arcClip === undefined ? 0 : c.arcClip; },
     labelFits: function (c) { var e = labelExtent(c); return !!e && labelInView(c.labelTr.getWorldPosition().add(new vec3(e.ox, e.oy, 0)), e); },
     armHaloOn: function () { return !!armHalo && armHalo.enabled; },
@@ -1805,6 +1810,7 @@ function swapInModel(job, gltf) {
     if (roomMode() && b2) {   // ground it: the model's lowest point sits exactly on the bottom of its collision sphere, so a body resting on a surface visibly touches it
         var gap = b2.min.y - (nodeW.y - n.size * 0.5);
         if (gap > 0.01) { ht.setWorldPosition(ht.getWorldPosition().sub(new vec3(0, gap, 0))); b2 = worldBounds(holder); }
+        n.vOff = new vec3(b2.center.x - nodeW.x, b2.center.y - nodeW.y, 0);   // beams attach at the model's visual centre
     }
     n.mBase = { p: ht.getLocalPosition(), r: ht.getLocalRotation(), s: ht.getLocalScale() };   // procedural life animates around this
     // collider sized from the fitted bounds (sphere radius is in node-local units)

@@ -136,3 +136,11 @@ NOTE: Do not install or use AiPreviewAgent*, Leaf, or PreviewInteractTool. They 
 BANNED lens-studio MCP tools (denied in .claude/settings.local.json; each reinstalls AiPreviewAgentInspect.lspkg or needs it/Leaf): PreviewInteractTool, QueryRuntimeSceneTool, CaptureRuntimeViewTool, InjectPreviewGesture, list_leaf_scenarios, run_leaf_scenario, open_leaf_panel, push_leaf_lens, set_leaf_execution_target.
 ALLOWED: RunAndCollectLogsTool, CapturePanelScreenshotTool, ExecuteEditorCode, RecompileTypeScriptTool, scene-graphql, asset-graphql and other editor tools.
 If a skill or tool tries to install AiPreviewAgent*/Leaf, stop and tell the user.
+
+## Last polish (final-* screenshots)
+- Toolbar ends just left of the sideboard's right speaker (`TOOLBAR_RIGHT_ANG`); 4.8 cm pills; third pill label is "•••" (the "…" glyph rendered low). Room layout sizes: cat 22, lantern 22, flower 20, home 28.
+- Beams attach at each model's visual centre: `n.vOff` (set in `swapInModel`) and `endOf(n)`, nudged toward the camera so the model doesn't hide the beam end.
+- Rule panel is a single column on the free side of the link near its midpoint (room-mode node obstacles scaled 0.62); saturated colours in `EDITOR_COLOR`.
+- `sparklesVfx` is disabled (stray white star); only `embersVfx` is driven.
+- Section 25 story test now drags the lantern with pressStart/pressEnd. 361/361 pass.
+- `final-2-mid-chase.jpg` removed; shots are final-1, -3, -4.
