@@ -52,6 +52,10 @@ Assets/Scripts/snapToken.local.ts
 Assets/Scripts/snapToken.local.ts.meta
 Assets/Scripts/snapToken.local.js
 Assets/Scripts/snapToken.local.js.meta
+Assets/Scripts/googleTokenLocal.ts
+Assets/Scripts/googleTokenLocal.ts.meta
+Assets/Scripts/googleTokenLocal.js
+Assets/Scripts/googleTokenLocal.js.meta
 *.local.ts
 *.local.js
 *.token
