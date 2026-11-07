@@ -2709,6 +2709,7 @@
     showCause: true
     showUniverse: true
     showRoom: true
+    showUi: true
     roomPlay: true
     perfSweep: true
     showEditor: true
@@ -2726,6 +2727,7 @@
       showCause: false
       showUniverse: false
       showRoom: false
+      showUi: false
       roomPlay: false
       perfSweep: false
       showEditor: false

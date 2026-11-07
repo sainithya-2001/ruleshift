@@ -5,6 +5,7 @@
 // @input bool showCause = false
 // @input bool showUniverse = false
 // @input bool showRoom = false
+// @input bool showUi = false
 // @input bool roomPlay = false
 // @input bool perfSweep = false
 // @input bool showEditor = false
@@ -423,17 +424,17 @@ if (script.runTests) {
             var EXP = ["a glowing alien flower", "a floating crystal energy core", "a tiny floating island with trees", "a tiny planet with rings", "a floating paper lantern", "a glowing alien flower"];
             check("14 Surprise me cycles the 5 prompts in order and wraps", JSON.stringify(stub.calls) === JSON.stringify(EXP), JSON.stringify(stub.calls));
             api.clearAll(); yield 0.2;
-            // 15 toolbar: icon-first pills, one-word labels that never wrap, grouped [Play Reset] [Create Surprise Speak] [Unlink Clear]
+            // 15 toolbar: three big icon-first pills [Create] [Play] [...], labels that never wrap
             var tf = ctl.toolbarFit();
-            check("15 Toolbar has the 7 one-word labels in group order", JSON.stringify(tf.labels) === JSON.stringify(["Play", "Reset", "Create", "Surprise", "Speak", "Unlink", "Clear"]), JSON.stringify(tf.labels));
-            check("15 Toolbar labels are single words (no spaces, nothing to wrap)", tf.labels.every(function (l) { return /^[A-Za-z]+$/.test(l); }));
+            check("15 Toolbar has the 3 big labels in order", JSON.stringify(tf.labels) === JSON.stringify(["Create", "Play", "…"]), JSON.stringify(tf.labels));
+            check("15 Toolbar labels are single words (nothing to wrap)", tf.labels.every(function (l) { return /^[A-Za-z…]+$/.test(l); }));
             check("15 Label fit pass completed", tf.ready === true && tf.size >= 14, "size " + tf.size);
-            var fitsAll = tf.fit.length === 7 && tf.fit.every(function (f) { return f.width <= f.allowed + 0.001 && f.height <= f.allowedH + 0.001; });
+            var fitsAll = tf.fit.length === 3 && tf.fit.every(function (f) { return f.width <= f.allowed + 0.001 && f.height <= f.allowedH + 0.001; });
             check("15 Every label fits its pill on one line (measured width and height)", fitsAll, tf.fit.map(function (f) { return f.label + " " + f.width.toFixed(2) + "/" + f.allowed.toFixed(2); }).join(" "));
             check("15 Label overflow is forced to single-line (never wraps)", ctl.toolbarPills.every(function (p) { return p.content.textComponent.horizontalOverflow === HorizontalOverflow.Overflow; }));
-            var cx = tf.centers, d01 = cx[1] - cx[0], d12 = cx[2] - cx[1], d23 = cx[3] - cx[2], d34 = cx[4] - cx[3], d45 = cx[5] - cx[4], d56 = cx[6] - cx[5];
-            check("15 Groups are separated by a larger gap than pills within a group", d12 > d01 + 0.5 && d45 > d34 + 0.5 && Math.abs(d01 - d23) < 0.01 && Math.abs(d23 - d34) < 0.01 && Math.abs(d01 - d56) < 0.01, [d01, d12, d23, d34, d45, d56].map(function (d) { return d.toFixed(2); }).join(","));
-            check("15 All 7 pills fit between the screen edges", Math.abs(cx[0]) + tf.pillWidth / 2 <= api.view().halfW && Math.abs(cx[6]) + tf.pillWidth / 2 <= api.view().halfW);
+            var cx = tf.centers, d01 = cx[1] - cx[0], d12 = cx[2] - cx[1];
+            check("15 The 3 pills are evenly spaced and centred", Math.abs(d01 - d12) < 0.01 && Math.abs(cx[0] + cx[2]) < 0.01, [d01, d12].map(function (d) { return d.toFixed(2); }).join(","));
+            check("15 All 3 pills fit between the screen edges", Math.abs(cx[0]) + tf.pillWidth / 2 <= api.view().halfW && Math.abs(cx[2]) + tf.pillWidth / 2 <= api.view().halfW);
             api.reset(); yield 0.2;
             check("15 Play pill reads Play when stopped", ctl.mainPill.content.text === "Play", ctl.mainPill.content.text);
             api.activate(); yield 0.2;
@@ -441,6 +442,47 @@ if (script.runTests) {
             api.pause(); yield 0.2;
             check("15 Play pill reads Play when paused", ctl.mainPill.content.text === "Play", ctl.mainPill.content.text);
             api.reset(); yield 0.2;
+            // 15b status indicator, menus, Preview voice message
+            check("15 Status reads Building in creation", T.statusText() === "Building", T.statusText());
+            api.activate(); yield 0.2;
+            check("15 Status reads Running while live", T.statusText() === "Running", T.statusText());
+            api.pause(); yield 0.2;
+            check("15 Status reads Paused when paused", T.statusText() === "Paused", T.statusText());
+            api.reset(); yield 0.2;
+            check("15 Menus start closed", T.menuState().create === false && T.menuState().more === false);
+            T.openMenu("create"); yield 0.2;
+            check("15 Create menu opens (and the More menu stays closed)", T.menuState().create === true && T.menuState().more === false);
+            var mp = T.menuPills().map(function (p) { return p.text; });
+            check("15 Create menu offers Surprise, Speak, saved creations and Basic building blocks", mp.indexOf("Surprise") >= 0 && mp.indexOf("Speak") >= 0 && mp.indexOf("House") >= 0 && mp.some(function (t) { return String(t).indexOf("Basic building blocks") === 0; }), JSON.stringify(mp));
+            T.openMenu("more"); yield 0.2;
+            check("15 Opening the More menu closes the Create menu", T.menuState().more === true && T.menuState().create === false);
+            check("15 More menu offers Reset, Unlink and Clear", ["Reset", "Unlink", "Clear"].every(function (t) { return mp.indexOf(t) >= 0 || T.menuPills().some(function (p) { return p.text === t; }); }));
+            T.closeMenus(); yield 0.1;
+            check("15 Menus close", !T.menuState().create && !T.menuState().more);
+            T.openMenu("create"); ctl.toggleSpeak(); yield 0.3;
+            check("15 Speak in the Preview shows the Spectacles message (and closes the menu)", ctl.caption.sceneObject.enabled === true && ctl.caption.text === "Voice works on Spectacles" && !T.menuState().create, ctl.caption.text);
+            ctl.caption.sceneObject.enabled = false; ctl.captionTimer = 0;
+            check("15 Saved creations are offered", api.savedModels().length >= 1);
+            var sv = api.spawnSaved(api.savedModels()[0]); yield 0.3;
+            check("15 A saved creation spawns as a real object, placed (no pinch wait)", sv >= 0 && api.count() === 1 && api.pendingPlacement() === -1, "idx " + sv);
+            api.clearAll(); yield 0.2;
+            check("15 Unknown saved creation is refused", api.spawnSaved("Nothing") === -1);
+            check("15 Discoveries are off by default (no card)", api.discoveriesOn() === false && api.cardInfo() === null);
+            api.setFirstHint(true); yield 0.2;
+            check("15 First-time hint shows on an empty stage", api.firstHintVisible() === true);
+            api.spawn({ shape: "sphere", sizeKey: "M" }); yield 0.2;
+            check("15 First-time hint disappears after the first object", api.firstHintVisible() === false);
+            api.clearAll(); yield 0.2;
+            check("15 First-time hint does not come back after Clear", api.firstHintVisible() === false);
+            api.setFirstHint(false);
+            // Connect / Remove pills beside the selected object
+            var ca = api.spawn({ shape: "sphere", sizeKey: "M", pos: new vec3(-6, 0, -46) }), cb = api.spawn({ shape: "cube", sizeKey: "M", pos: new vec3(8, 0, -46) }); yield 0.2;
+            T.tap(ca); yield 0.4;
+            check("15 Selecting an object shows Connect and Remove pills", ctl.deleteObj.enabled === true && ctl.connectObj.enabled === true);
+            var rt = ctl.deleteObj.getTransform().getWorldPosition(), ct2 = ctl.connectObj.getTransform().getWorldPosition();
+            check("15 Connect sits above Remove, both at one x beside the object", Math.abs(rt.x - ct2.x) < 0.01 && ct2.y > rt.y, JSON.stringify([rt.x, ct2.x, rt.y, ct2.y]));
+            check("15 Connect with exactly two objects links them", api.connectSelected() === true && T.connections.length === 1, "links " + T.connections.length);
+            api.clearAll(); yield 0.2;
 
             // 16 the Delete pill never overlaps an "Imagining…" / failure caption
             stub.calls.length = 0; stub.cbs.length = 0;
@@ -608,7 +650,7 @@ if (script.runTests) {
         // Delete pill: sits above the selected object's top edge, and labels keep clear of it
         T.tap(1); yield 0.5;
         var pr = T.pillRect(), sn = nodes[1];
-        check("20 Delete pill is above the selected object's top edge", !!pr && (pr.y - pr.hh) >= (sn.pos.y + sn.radius) / -sn.pos.z - 0.0001, pr ? "pill bottom " + (pr.y - pr.hh).toFixed(4) + " node top " + ((sn.pos.y + sn.radius) / -sn.pos.z).toFixed(4) : "no pill");
+        check("20 Connect/Remove pills sit beside the selected object (never over it)", !!pr && ((pr.x - pr.hw) >= (sn.pos.x + sn.radius) / -sn.pos.z - 0.0001 || (pr.x + pr.hw) <= (sn.pos.x - sn.radius) / -sn.pos.z + 0.0001), pr ? "pill x " + pr.x.toFixed(4) + " hw " + pr.hw.toFixed(4) + " node x " + (sn.pos.x / -sn.pos.z).toFixed(4) : "no pill");
         var lp20 = 0; T.connections.forEach(function (c) { var r = c.lblRect; if (r && pr && Math.abs(r.x - pr.x) < r.hw + pr.hw && Math.abs(r.y - pr.y) < r.hh + pr.hh) { lp20++; } });
         check("20 Link labels keep clear of the Delete pill", lp20 === 0, "overlapping " + lp20);
         var tr20 = lf20.lblRect; T.setTestPill({ x: tr20.x, y: tr20.y, hw: 0.04, hh: 0.02 }); yield 0.3;
@@ -785,6 +827,7 @@ if (script.runTests) {
             for (var k = 1; k <= 8; k++) { n.tr.setLocalPosition(new vec3(sx + (x - sx) * k / 8, sy + (y - sy) * k / 8, n.pos.z)); yield 0.1; }
             T.pressEnd(i, true); yield 0.2;
         }
+        api.setDiscoveries(true);   // Discoveries are off by default; this section exercises the card
         // the card: collapsed by default, never over objects or the toolbar, ticks persist until Clear all
         api.clearAll(); yield 0.3; api.loadDemo(); yield 0.6;
         var ci = api.cardInfo ? api.cardInfo() : null;
@@ -891,6 +934,7 @@ if (script.runTests) {
         var wj = api.spawn({ shape: "sphere", sizeKey: "M" }); yield 0.2; T.pressStart(wj); yield 0.1; T.pressEnd(wj, true); yield 0.2;
         check("23 pressing the waiting object clears the hint", !T.hintVisible());
         api.clearAll(); yield 0.2;
+        api.setDiscoveries(false);
 
         // 24. Visual pass: curved beams with flowing motes, labels only on the selected link, procedural life on models, light ambient sparkles
         api.clearAll(); yield 0.2;
@@ -1114,6 +1158,22 @@ if (script.showRoom) {
             else if (st === 4 && el > stEl + 15) { T.setFixedStep(0); var n = T.nodes; T.place(2, n[3].pos.add(new vec3(0, n[2].radius + n[3].radius - 0.5, 0))); st = 5; stEl = el; print("RULESHIFT SHOW room-collide"); }
             else if (st === 5 && T.connections.some(function (c) { return c.rule === "REPEL"; })) { st = 6; stEl = el; print("RULESHIFT SHOW room-flipped"); }
             else if (st === 6 && el > stEl + 9) { st = 7; T.setFixedStep(0.0001); print("RULESHIFT SHOW room-fled (frozen)"); }
+        });
+    });
+}
+
+// Visual check (not a test): the UI-stage screenshots in the room preset from the default camera. Markers: ui-nothing, ui-create, ui-object, ui-connection (each held ~14 s, the sim stays in Building).
+if (script.showUi) {
+    script.createEvent("OnStartEvent").bind(function () {
+        var api = script.controller.api, T = api.test, st = 0, el = 0, t0 = 0;
+        script.createEvent("UpdateEvent").bind(function (e) {
+            el += e.getDeltaTime();
+            if (st === 0 && el > 1) { script.controller.demoStage = "room"; api.applyDemoSetup(); st = 1; t0 = el; }
+            else if (st === 1 && el > t0 + 8) { st = 2; t0 = el; print("RULESHIFT SHOWUI ui-nothing"); }
+            else if (st === 2 && el > t0 + 24) { T.openMenu("create"); st = 3; t0 = el; print("RULESHIFT SHOWUI ui-create"); }
+            else if (st === 3 && el > t0 + 24) { T.closeMenus(); T.tap(1); st = 4; t0 = el; print("RULESHIFT SHOWUI ui-object"); }
+            else if (st === 4 && el > t0 + 24) { T.tap(1); T.openEditor(T.connections[1]); st = 5; t0 = el; print("RULESHIFT SHOWUI ui-connection"); }
+            else if (st === 5 && el > t0 + 24) { st = 6; print("RULESHIFT SHOWUI done"); }
         });
     });
 }

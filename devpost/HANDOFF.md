@@ -1,6 +1,6 @@
-# Status (room-scale build done; UI stage next)
+# Status (room-scale build and UI stage done)
 
-**Tests:** 322/322 PASS on the sim clock (sections 0-24 at legacy scale K=1, section 25 at room scale). **Room-scale build:** complete in the controller; see below.
+**Tests:** 342/342 PASS on the sim clock (sections 0-24 at legacy scale K=1, section 25 at room scale). **Room-scale build:** complete in the controller; see below.
 
 ## Room scale (what changed)
 - World scale `K = ROOM_K = 2.4`: every distance, speed, force, threshold and size is multiplied by K. `api.test.setWorldScale(1)` restores the legacy 46 cm stage so the original regression suite still runs (the suite starts with it); section 25 switches to ROOM_K. In the room, link rest gap is 6 cm (not K-scaled) and the repel range is 48 cm (`gapK()`, `repK()`), so a compact layout still has room to travel.
@@ -21,8 +21,18 @@
 - Evidence for the VFX being the big cost: a one-shot sweep on the stock-VFX state (30 s pre-roll, models already 9k tris) gave baseline 3.9 fps, VFX off 9.7 fps (noisy single reading, not interleaved). Interleaved on/off on the lite-VFX state (drift cancels): vfx 5.03 vs 5.17, beams 5.89 vs 5.99, halos 6.65 vs 7.12, models 8.41 vs 8.68, SIK visuals 7.88 vs 7.61 (fps drifts upward during the run, so only the on/off difference within a block means anything).
 - Stray folder: an early failed unzip created `C:\c\Users\...` (my mistake, outside the project); safe to delete.
 
-## UI stage (next, not started)
-Object-anchored contextual panels plus one smoothed head-follow toolbar (decision from the user). Today the toolbar/editor/card are world-fixed at `WORLD_Z=-95` and overlap content when the view pitches. Also pending from the locked direction: Discoveries off by default, palette under Create, voice inside Create.
+## UI stage (done)
+Small UI, big few buttons, only what is needed. All in `Assets/Scripts/RuleShiftControls.ts` plus small controller hooks.
+- **Toolbar** (nothing selected): three big pills low in the view, `[Create] [Play/Pause] […]`, on a `Toolbar Root` that eases toward the camera rotation (`updateToolbarFollow`, 5/s smoothing; identity in the Preview where the camera is fixed). A tiny **status** word sits above Play: Building (yellow) / Running (green) / Paused (orange). Toolbar top is still published through `api.setToolbarTop` so the rule editor and Discoveries card keep clear of it.
+- **"…" menu**: Reset, Unlink, Clear (Unlink kept so no function is lost). **Create menu**: "Imagine something new" (Surprise, Speak), "Your creations" (saved models via `api.spawnSaved(name)`, `api.savedModels()`), and a collapsed "Basic building blocks" pill that opens the old palette band. One menu open at a time; menus close on any action, Play, or when the rule editor opens.
+- **Speak in the Preview** shows the caption "Voice works on Spectacles" (`deviceInfoSystem.isEditor()`); on device it is unchanged (ASR). `api.test.forceVoice(true)` bypasses the check.
+- **Object selected**: **Connect** and **Remove** pills stacked beside the object (right, or left near the view edge) at the nearer depth 70 so nothing covers them; hidden while the object is generating or a menu is open. Connect arms linking (`api.connectSelected()`, `connectArmed()`): the next object tapped is linked (Attract); with exactly two objects it links them at once. The pill turns blue-bright while armed. Remove = old Delete (`deleteObj`/`deletePlate` names kept).
+- **Connection selected**: the rule editor, 5 coloured rule pills in a compact panel beside the link, the current rule bright with a white border and a check mark.
+- **Discoveries off by default** (`api.setDiscoveries(true)` turns the card and "Discovered" captions back on; section 23 of the suite enables it). **First-time hint** "Create something to begin" shows only on an empty stage until the first object exists, never on presets (`api.setFirstHint`, `firstHintVisible`). The placement hint ("Pinch a surface to place it") is unchanged.
+- **Bright rooms**: every pill has its own saturated blue plate (`PILL`), the Button's grey plate is hidden (`opacity = 0`), pill text is white with a dark outline (`updateOutlines`), captions/status are outlined.
+- Test hooks: `api.test.openMenu('create'|'more')`, `closeMenus`, `menuState`, `menuPills`, `statusText`, `forceVoice`, `connectColor`; tests object flag `showUi` (room preset, holds 24 s each on: nothing selected, Create menu, object selected, connection selected).
+- Screenshots (default camera, room preset): `devpost/screenshots/ui-nothing-selected.jpg`, `ui-create-menu.jpg`, `ui-object-selected.jpg`, `ui-connection-selected.jpg`.
+- Not done / honest limits: only the toolbar follows the head; the object pills, rule editor and card are still anchored in angular space at the world plane (fine for a fixed Preview camera, untested head-moving on device). The selected link's rule label can clip at the top or right edge of the view (existing label placement; seen in `ui-connection-selected.jpg`). The Create menu covers part of the room while open. The "…" glyph renders small. Real taps on the new pills are untested (tests call the same handlers).
 
 ## Workflow rules
 - Tests must pass before each commit; commit and push per step; retune test values, never delete checks; keep reports short.
@@ -41,7 +51,7 @@ Five rules (Attract, Repel, Collision Trigger, Transfer, Grow); contextual rule 
 - `chain`: three spheres (gem, orb, cube) spread across the stage with Attract, Repel and On Collision links so one collision flips another rule.
 - `universe`: four saved Snap3D models from `Assets/RULESHIFT Models/` (house on a floating island 1.5x heavy, cat 0.7x light, lantern, flower). Cat-lantern Attract, lantern-flower Collision Trigger, cat-home Attract. Hand-triggered: the cat chases the lantern (about 10 cm); drag the lantern into the flower, the pulse flips cat-lantern to Repel and the cat is pushed home. No token needed.
 - `room`: the room-scale sample world (see Room scale above).
-- Test-only scene flags on the tests object: `showRoom`, `roomPlay`, `genModels`, `showUniverse`, `showEditor`, `showGrow`, `showShots`, `shotsPulses`, `liveImagine`, `showCause`. Keep all off when committing.
+- Test-only scene flags on the tests object: `showRoom`, `showUi`, `roomPlay`, `genModels`, `showUniverse`, `showEditor`, `showGrow`, `showShots`, `shotsPulses`, `liveImagine`, `showCause`. Keep all off when committing.
 
 ## Known issues / honest limits
 - Preview only: no Spectacles hardware testing. Voice is device-only (no mic ASR in Preview).
@@ -52,14 +62,14 @@ Five rules (Attract, Repel, Collision Trigger, Transfer, Grow); contextual rule 
 - Up to 8 objects. Bloom was skipped by decision; no focused fps figure yet (see fps).
 - Lens Studio can run stale scripts: always run `RecompileTypeScriptTool` before refreshing the Preview.
 
-## Locked direction (room-as-canvas items done; UI items pending)
+## Locked direction (room-as-canvas and UI items done)
 A user-created living world in the user's real room. Creation and simulation are the two primary actions. No new rules, shapes or challenges.
 - **Room as canvas:** remove the stage disc; objects live 0.5-2 m away at different heights, on real surfaces (WorldQuery, Sunlit Room table/floor as fallback) or floating; bounds become a large volume; retune forces, distances, collision sizes and caps for room scale; hero objects 20-40 cm.
 - **Sample world plus live creation:** a `room` preset as the sample world (island house above the table, flower on the floor, floating lantern, cat on the floor), story through the real rule engine (cat-lantern Attract, lantern into flower fires the trigger, flips to Repel, cat flees home). The user can then create and change things live.
 - **Minimal contextual UI:** controls appear only when relevant.
 - **Discoveries off** by default.
 - **Palette moved under Create** as "Basic building blocks".
-- **Voice inside Create** (no separate Speak control).
+- **Voice inside Create** (no separate Speak control). Done.
 - Preserve: AI generation, saved models, the rule engine, cause pulses, tests. Add every asset and licence to a CREDITS section in the README. Design for bright rooms (saturated colours, bright beam cores, outlined UI text). Parked decisions from the Step 0 report: UI anchoring, which saved models to keep versus new assets, whether to test bloom on a throwaway branch.
 
 Original handoff follows (older details; this Status section wins on conflicts).

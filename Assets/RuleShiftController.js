@@ -284,9 +284,16 @@ var hintObj = null, hintText = null;
 var emptyHint = null;
 (function () {
     emptyHint = makeText("Empty Hint", 85, new vec3(0, 2, WORLD_Z), new vec4(0.85, 0.95, 1, 1)).obj;
-    emptyHint.getComponent("Component.Text").text = "Tap Create to make your first object";
+    emptyHint.getComponent("Component.Text").text = "Create something to begin";
 })();
-function updateEmptyHint() { if (emptyHint) { emptyHint.enabled = nodes.length === 0; } }
+// The one first-time hint: shown on an empty stage until the first object exists, then never again (a preset stage never shows it).
+var firstHintDone = !!script.demoPreset || !!script.demoStage, firstHintOn = true;
+function updateEmptyHint() {
+    if (nodes.length > 0) { firstHintDone = true; }
+    if (emptyHint) { emptyHint.enabled = firstHintOn && !firstHintDone && nodes.length === 0; }
+}
+script.api.firstHintVisible = function () { return !!emptyHint && emptyHint.enabled; };
+script.api.setFirstHint = function (on) { firstHintOn = !!on; if (on) { firstHintDone = false; } updateEmptyHint(); };
 var wqSession = null, wqStatus = "untested";
 function initWorldQuery() {
     try {
@@ -462,8 +469,21 @@ function handleTapNode(n) {
     var c = slotFor(selNode, n, true);
     if (!c.active) { activateLink(c, RULES.ATTRACT, false); }
     else { print("RULESHIFT already linked"); }
-    selNode = null;
+    selNode = null; connectArmed = false;
 }
+// Connect pill: arms linking from the selected object; the next object tapped is linked to it (with exactly two objects it links them straight away).
+var connectArmed = false;
+function connectSelected() {
+    if (!selNode) { return false; }
+    if (nodes.length === 2) {
+        var o = nodes[0] === selNode ? nodes[1] : nodes[0], c = slotFor(selNode, o, true);
+        if (!c.active) { activateLink(c, RULES.ATTRACT, false); }
+        selNode = null; connectArmed = false; return true;
+    }
+    connectArmed = !connectArmed; return connectArmed;
+}
+script.api.connectSelected = connectSelected;
+script.api.connectArmed = function () { return connectArmed && !!selNode; };
 function pressStartNode(n) { if (pendingPlace === n) { pendingPlace = null; } n.dragging = true; n.tapT = elapsed; n.tapP = n.tr.getLocalPosition(); }
 function pressEndNode(n, allowTap) {
     if (nodeIndex(n) < 0) { return; }
@@ -475,7 +495,7 @@ function clearLinks() {
     clearCause();
     slots.forEach(function (c) { c.active = false; c.visual.enabled = false; c.labelObj.enabled = false; c.beamRoot.enabled = false; });
     refreshConnections();
-    selNode = null;
+    selNode = null; connectArmed = false;
     print("RULESHIFT links cleared");
 }
 function updateSelection() {
@@ -1063,8 +1083,11 @@ var CARD = { d: 85, cw: 11, ch: 2.8, pad: 0.8, layouts: [] };
     L.w = L.cols * L.cellW + 2 * CARD.pad; L.h = CARD.ch + L.rows * L.rowH + CARD.pad; CARD.layouts.push(L);
 });
 var cardOpen = false, cardSuppressed = false, cardRect = null, cardCorner = -1;
+var discoveriesOn = false;   // Discoveries are off by default (the code and tests stay); api.setDiscoveries(true) turns the card and captions back on
+script.api.setDiscoveries = function (on) { discoveriesOn = !!on; if (!on) { cardRect = null; } };
+script.api.discoveriesOn = function () { return discoveriesOn; };
 function updateCard() {
-    if (cardSuppressed) { cardRect = null; return; }
+    if (cardSuppressed || !discoveriesOn) { cardRect = null; return; }
     var v = script.api.view(), ob = editorObstacles(true, true), step = 1.5 / CARD.d;
     function blocked(cx, cy, hw, hh) { return editorBlocked(cx, cy, hw, hh, ob, 0.8); }
     function scan(w, h) {   // the free spot nearest the preferred top corner (then nearest the other one)
@@ -1340,6 +1363,17 @@ script.api.room = { floorY: FLOOR_Y, tableY: TABLE_Y_ROOM, tableRect: TABLE_RECT
 script.api.worldScale = function () { return K; };
 script.api.count = function () { return nodes.length; };
 script.api.maxNodes = MAX_NODES;
+// "Your creations": the saved generated models (the Snap3D results kept in the project) can be dropped into the room with one tap.
+var SAVED = [["House", "homeModel", 0.9], ["Cat", "catModel", 0.8], ["Lantern", "lanternModel", 0.7], ["Flower", "flowerModel", 0.7]];
+script.api.savedModels = function () { return SAVED.filter(function (d) { return !!script[d[1]]; }).map(function (d) { return d[0]; }); };
+script.api.spawnSaved = function (name) {
+    var d = SAVED.filter(function (e) { return e[0] === name; })[0];
+    if (!d || !script[d[1]]) { return -1; }
+    var n = spawnModelNode(script[d[1]], name, imagineSize() * (roomMode() ? 1.1 : 1), d[0] === "House" ? "heavy" : "light", findFreeSpot(imagineSize() * 0.5), NODE_COLORS[0]);
+    if (!n) { return -1; }
+    if (pendingPlace === n) { pendingPlace = null; }
+    return nodeIndex(n);
+};
 script.api.deleteSelected = function () { return selNode ? deleteNode(selNode) : false; };
 script.api.selectedInfo = function () {
     if (!selNode) { return null; }

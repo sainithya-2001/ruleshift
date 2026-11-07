@@ -41,6 +41,7 @@
     showGrow: false
     showRoom: false
     showShots: false
+    showUi: false
     showUniverse: false
   ScriptTypesHidden:
     {}
@@ -58,6 +59,7 @@
       showCause: false
       showUniverse: false
       showRoom: false
+      showUi: false
       roomPlay: false
       perfSweep: false
       showEditor: false
