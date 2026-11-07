@@ -433,7 +433,7 @@ if (script.runTests) {
             check("15 Every label fits its pill on one line (measured width and height)", fitsAll, tf.fit.map(function (f) { return f.label + " " + f.width.toFixed(2) + "/" + f.allowed.toFixed(2); }).join(" "));
             check("15 Label overflow is forced to single-line (never wraps)", ctl.toolbarPills.every(function (p) { return p.content.textComponent.horizontalOverflow === HorizontalOverflow.Overflow; }));
             var cx = tf.centers, d01 = cx[1] - cx[0], d12 = cx[2] - cx[1];
-            check("15 The 3 pills are evenly spaced and centred", Math.abs(d01 - d12) < 0.01 && Math.abs(cx[0] + cx[2]) < 0.01, [d01, d12].map(function (d) { return d.toFixed(2); }).join(","));
+            check("15 The 3 pills are evenly spaced and sit low in the right half (clear of the sideboard objects)", Math.abs(d01 - d12) < 0.01 && cx[0] - tf.pillWidth / 2 > 0, [d01, d12].map(function (d) { return d.toFixed(2); }).join(","));
             check("15 All 3 pills fit between the screen edges", Math.abs(cx[0]) + tf.pillWidth / 2 <= api.view().halfW && Math.abs(cx[2]) + tf.pillWidth / 2 <= api.view().halfW);
             api.reset(); yield 0.2;
             check("15 Play pill reads Play when stopped", ctl.mainPill.content.text === "Play", ctl.mainPill.content.text);
@@ -987,7 +987,7 @@ if (script.runTests) {
         check("25 hero objects are 20-40 cm", rn.every(function (n) { return 2 * n.radius >= 19.9 && 2 * n.radius <= 40.1; }), rn.map(function (n) { return (2 * n.radius).toFixed(0); }).join());
         check("25 objects sit 1.1-1.5 m in front of the user", rn.every(function (n) { return -n.pos.z >= 100 && -n.pos.z <= 150; }), rn.map(function (n) { return (-n.pos.z).toFixed(0); }).join());
         var vw = api.view(), tx = vw.halfW / 95, ty = vw.halfH / 95;
-        check("25 everything is visible from the default camera, above the toolbar (angular extents)", rn.every(function (n) { var dp = -n.pos.z; return Math.abs(n.pos.x) + n.radius <= tx * dp + 0.01 && n.pos.y + n.radius <= ty * dp + 0.01 && n.pos.y - n.radius >= api.toolbarTop() * dp - 0.01; }), "tan x " + tx.toFixed(3) + " tan y " + ty.toFixed(3) + " toolbar " + api.toolbarTop().toFixed(3));
+        check("25 everything is visible from the default camera, down to the sideboard (angular extents)", rn.every(function (n) { var dp = -n.pos.z; return Math.abs(n.pos.x) + n.radius <= tx * dp + 0.01 && n.pos.y + n.radius <= ty * dp + 0.01 && n.pos.y - n.radius >= -ty * dp - 0.01 && n.pos.y - n.radius >= api.floorY - 0.01; }), "tan x " + tx.toFixed(3) + " tan y " + ty.toFixed(3) + " floor " + api.floorY);
         check("25 all objects are inside the room volume", rn.every(function (n) { return Math.abs(n.pos.x) <= rb.x + 0.01 && n.pos.y >= rb.yMin - 0.01 && n.pos.y <= rb.yMax + 0.01 && n.pos.z <= rb.zNear + 0.01 && n.pos.z >= rb.zFar - 0.01; }));
         var rFloor = rn.filter(function (n) { return n.obj.name === "Cat" || n.obj.name === "Flower"; });
         check("25 the cat and the flower rest on the table (the floor of the play volume)", rFloor.length === 2 && rFloor.every(function (n) { return Math.abs(n.pos.y - n.radius - api.floorY) < 0.6; }), rFloor.map(function (n) { return (n.pos.y - n.radius).toFixed(1); }).join());
@@ -996,7 +996,7 @@ if (script.runTests) {
         check("25 objects live at different heights (floor, table height, above)", hs >= 3, "bands " + hs);
         check("25 the island house floats above the virtual table plane and the lantern floats elsewhere", rn[0].pos.y - rn[0].radius > api.tableY && rn[2].pos.y - rn[2].radius > api.floorY + 20, "tableY " + api.tableY);
         check("25 links: lantern-flower trigger and cat-lantern attract; no cat-home link at the start", T.connections.length === 2 && conns[0].rule === "COLLISION_TRIGGER" && conns[1].rule === "ATTRACT", T.connections.map(function (c) { return c.rule; }).join());
-        var hT = T.planeHit(new vec3(0, 0, 0), new vec3(0, -24, -125).normalize()), hF = T.planeHit(new vec3(0, 0, 0), new vec3(60, -24, -125).normalize()), hU = T.planeHit(new vec3(0, 0, 0), new vec3(0, 20, -100).normalize());
+        var hT = T.planeHit(new vec3(0, 0, 0), new vec3(0, api.tableY, -125).normalize()), hF = T.planeHit(new vec3(0, 0, 0), new vec3(60, api.tableY, -125).normalize()), hU = T.planeHit(new vec3(0, 0, 0), new vec3(0, 20, -100).normalize());
         check("25 surface fallbacks: a ray lands on the virtual table, else the floor, never above the horizon", hT && hT.surface === "table" && Math.abs(hT.p.y - api.tableY) < 0.5 && hF && hF.surface === "floor" && Math.abs(hF.p.y - api.floorY) < 0.5 && hU === null, (hT && hT.surface) + "/" + (hF && hF.surface) + "/" + hU);
         api.activate();
         var catStart = rn[1].pos.distance(rn[2].pos), nearest = catStart;
@@ -1014,15 +1014,15 @@ if (script.runTests) {
 
         // 26. Presentation: the selected link's label beside its own beam, separated arcs, the Create menu in empty space, the armed Connect state
         api.reset(); yield 0.3; T.labelsAll(false);
-        var c26 = conns[1]; T.openEditor(c26); yield 0.5;
+        var c26 = conns[1]; T.labelsAll(true); T.openEditor(c26); yield 0.5;
         check("26 the selected link's label sits at its own beam midpoint (beside it, in view, never far)", T.labelToMid(c26) >= 0 && T.labelToMid(c26) < 16 && T.labelFits(c26), "gap " + T.labelToMid(c26).toFixed(1));
-        T.closeEditor();
+        T.closeEditor(); T.labelsAll(false);
         var ex26 = api.spawn({ shape: "sphere", sizeKey: "M", bounce: "low", weight: "light" }); T.place(ex26, new vec3(6, -4, -125)); var cx26 = T.connect(1, ex26, "ATTRACT"); yield 1.5;
         check("26 two beams leaving the cat in similar directions arc to opposite sides, taller", c26.arcAmt * cx26.arcAmt < 0 && Math.abs(c26.arcAmt) > 1.5 && Math.abs(cx26.arcAmt) > 1.5, c26.arcAmt.toFixed(2) + " / " + cx26.arcAmt.toFixed(2));
         check("26 the two arcs are clearly separate (control points more than 10 cm apart)", c26.arcC.distance(cx26.arcC) > 10, c26.arcC.distance(cx26.arcC).toFixed(1));
-        T.openEditor(cx26); yield 0.5;
+        T.labelsAll(true); T.openEditor(cx26); yield 0.5;
         check("26 even in a crowded spot the label stays near its own beam midpoint and in view", T.labelToMid(cx26) < 22 && T.labelFits(cx26), "gap " + T.labelToMid(cx26).toFixed(1));
-        T.closeEditor(); T.deleteNode(ex26); yield 0.3;
+        T.closeEditor(); T.labelsAll(false); T.deleteNode(ex26); yield 0.3;
         T.openMenu("create"); yield 0.3; var cp26 = T.createPlacement(), lim26 = api.view().halfW / 95;
         check("26 the Create menu opens in empty space: it covers no object and stays inside the view", cp26 && cp26.penetration < 0.001 && Math.abs(cp26.rect.x) + cp26.rect.hw <= lim26 + 0.001, cp26 ? "pen " + cp26.penetration.toFixed(4) : "none");
         T.closeMenus(); yield 0.2;
@@ -1033,6 +1033,29 @@ if (script.runTests) {
         T.tap(1); yield 0.3;
         check("26 selecting an object again does not start armed", !api.connectArmed() && T.selected() === 1);
         T.tap(1); yield 0.2;
+        // 27. Final presentation: the world stands on the real sideboard, the toolbar clears it, no floating label with the panel open, panel beside its link, beams routed around objects
+        api.reset(); yield 0.3; api.clearAll(); api.loadRoom(); yield 0.8;
+        var vw27 = api.view(), n27 = nodes.slice(), cat27 = 1, lan27 = 2, flo27 = 3, hom27 = 0;
+        check("27 the floor of the room is the sideboard top (the thin strip at the bottom of the default view)", api.floorY / 125 < -0.277 && api.floorY / 125 > -vw27.halfH / 95, "angular " + (api.floorY / 125).toFixed(3));
+        check("27 the cat and the flower visibly stand on the surface (model feet within 1 cm of it)", [cat27, flo27].every(function (i) { var b = T.visualBottom(i); return b !== null && Math.abs(b - api.floorY) < 1.0; }), [cat27, flo27].map(function (i) { return (T.visualBottom(i) - api.floorY).toFixed(2); }).join());
+        check("27 the lantern floats above the sideboard and the island house floats higher, on the left", n27[lan27].pos.y - n27[lan27].radius > api.floorY + 15 && n27[hom27].pos.y > n27[lan27].pos.y && n27[hom27].pos.x < 0, "lantern y " + n27[lan27].pos.y.toFixed(0) + " house y " + n27[hom27].pos.y.toFixed(0));
+        var tfin = ctl.toolbarFit(), tbLeft = (tfin.centers[0] - tfin.pillWidth / 2) / 95 * 125;
+        check("27 the toolbar sits low in the right corner, clear of the cat and the flower", tbLeft > n27[flo27].pos.x + 6 && tbLeft > n27[cat27].pos.x + 20, "toolbar left at 1.25 m: " + tbLeft.toFixed(1) + " cm, flower x " + n27[flo27].pos.x.toFixed(1));
+        check("27 the toolbar keeps three pills, each at least 5 cm wide", tfin.labels.length === 3 && tfin.pillWidth >= 5, "pill " + tfin.pillWidth);
+        var c27 = conns[1]; T.openEditor(c27); yield 0.6;
+        check("27 with the rule panel open the link shows no floating label (the panel names the rule)", T.beamInfo(c27).labelOn === false, "labelOn " + T.beamInfo(c27).labelOn);
+        var ei27 = api.editorInfo(), mid27 = c27.A.pos.add(c27.B.pos).uniformScale(0.5), md27 = Math.max(-mid27.z, 1);
+        check("27 the rule panel opens beside the selected link's midpoint", ei27 && Math.sqrt((ei27.x - mid27.x / md27) * (ei27.x - mid27.x / md27) + (ei27.y - mid27.y / md27) * (ei27.y - mid27.y / md27)) < 0.2, ei27 ? "dx " + (ei27.x - mid27.x / md27).toFixed(3) + " dy " + (ei27.y - mid27.y / md27).toFixed(3) : "none");
+        check("27 the panel covers no object and stays above the sideboard line", T.editorOverlaps() === 0 && ei27 && ei27.y > api.toolbarTop(), "overlaps " + T.editorOverlaps());
+        T.closeEditor(); yield 0.2;
+        T.editorFitReset(); var okFit27 = true, wFit27 = [];
+        for (var ri = 0; ri < 5; ri++) { var rr = ["ATTRACT", "REPEL", "COLLISION_TRIGGER", "TRANSFER", "GROW"][ri]; T.openEditor(c27); yield 0.3; api.applyEditorRule(rr); yield 0.2; }
+        T.openEditor(c27); yield 0.3; var ef27 = T.editorFit(); T.closeEditor();
+        check("27 every rule name, with its check mark, fits inside its pill (Transfer and Collision Trigger included)", ef27.widths.length === 5 && ef27.widths.every(function (w) { return w > 0 && w <= ef27.pill - 0.8; }), ef27.widths.map(function (w) { return w.toFixed(2); }).join() + " of " + ef27.pill);
+        api.reset(); yield 0.3;
+        var mid28 = n27[cat27].pos.add(n27[lan27].pos).uniformScale(0.5), blk27 = api.spawn({ shape: "sphere", sizeKey: "S", bounce: "low", weight: "light" }); T.place(blk27, new vec3(mid28.x + 2, mid28.y + 2, mid28.z)); yield 1.5;
+        check("27 a beam that would pass through another object bends around it (no overlap with any object)", T.beamClipNow(conns[1]) < 0.0008 && conns.every(function (c) { return T.beamClipNow(c) < 0.0008; }), conns.map(function (c) { return T.beamClipNow(c).toFixed(4); }).join());
+        T.deleteNode(blk27); yield 0.3;
         api.reset(); yield 0.3;
         T.setWorldScale(1); api.clearAll();
 
@@ -1185,6 +1208,8 @@ if (script.showRoom) {
         });
     });
 }
+
+
 
 // Visual check (not a test): the UI-stage screenshots in the room preset from the default camera. Markers: ui-nothing, ui-create, ui-object, ui-connection (each held ~14 s, the sim stays in Building).
 if (script.showUi) {

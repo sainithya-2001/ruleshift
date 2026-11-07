@@ -42,10 +42,10 @@ function roomMode() { return K !== 1; }
 // Room geometry (cm, the camera sits at the origin looking down -z). Measured in the Preview's Sunlit Room by camera parallax: eye height is about 1.5 m, so the floor is at y = -150
 // (+-15 cm); the room's real tables are beyond the 2 m range (the coffee table is ~3.2 m away, the credenza ~4.4 m). The "table" fallback is therefore a virtual 75 cm table
 // plane within reach (y = -75); on a device WorldQuery finds the real surfaces first and these are only the fallback. The legacy stage kept its by-eye table height (-19).
-var TABLE_Y_STAGE = -19, TABLE_Y_ROOM = -24, FLOOR_Y = TABLE_Y_ROOM;   // room: the virtual table is 24 cm below eye level (Preview has no real table within 2 m) and is also the floor of the play volume, so everything stays in the default view above the toolbar
+var TABLE_Y_STAGE = -19, TABLE_Y_ROOM = -37.5, FLOOR_Y = TABLE_Y_ROOM, SIDEBOARD_TOP = -0.277;   // room: the virtual table is the top of the real sideboard in the Sunlit Room Preview, 37.5 cm below eye level at 1.25 m (its back edge sits at angular -0.277, a thin strip down to the bottom of the view); SIDEBOARD_TOP keeps floating panels above it. Old note: 24 cm below eye level (Preview has no real table within 2 m) and is also the floor of the play volume, so everything stays in the default view above the toolbar
 function tableY() { return roomMode() ? TABLE_Y_ROOM : TABLE_Y_STAGE; }
 var TABLE_RECT = { x: 40, zNear: -95, zFar: -150 };   // where the table fallback applies; a ray landing outside it continues to the floor
-var ROOM = { x: 36, yMax: 42, zNear: -110, zFar: -145 };   // the play volume, 1.1-1.45 m in front of the user: x half-width 36 cm is exactly the default Preview view at 1.25 m, so nothing can leave the screen; floor = FLOOR_Y (the table), ceiling yMax
+var ROOM = { x: 36, yMax: 42, zNear: -116, zFar: -145 };   // the play volume, 1.1-1.45 m in front of the user: x half-width 36 cm is exactly the default Preview view at 1.25 m, so nothing can leave the screen; floor = FLOOR_Y (the table), ceiling yMax
 var SIZES = { S: 7, M: 10, L: 14 };            // node scale in cm at K = 1 (diameter of the bounding sphere); spawnNode multiplies by K
 var WEIGHTS = { light: 1.6, heavy: 0.5 };      // multiplies how strongly forces move the node
 var BOUNCES = { low: 0, high: 0.85 };          // restitution on collisions and walls
@@ -849,7 +849,7 @@ function labelHitsNode(p, e, self) {   // compare in screen (angular) space: lab
 var labelsAll = false;   // test hook: the suite measures every label; in play only the selected connection shows its rule name
 function labelInView(P, e) {   // the whole label rectangle (centre P, half-size e.hw/e.hh) inside the visible view and above the toolbar
     var dp = Math.max(-P.z, 1), v = script.api.view(), lx = P.x / dp, ly = P.y / dp, hw = e.hw / dp, hh = e.hh / dp;
-    return Math.abs(lx) + hw <= v.halfW / -WORLD_Z * 0.96 && ly + hh <= v.halfH / -WORLD_Z * 0.94 && ly - hh >= toolbarTopAng + 0.01;
+    return Math.abs(lx) + hw <= v.halfW / -WORLD_Z * 0.96 && ly + hh <= v.halfH / -WORLD_Z * 0.94 && ly - hh >= tbTop() + 0.01;
 }
 function labelPenalty(p, e, self) {   // how much a label rectangle (object position p) overlaps nodes (80% discs), UI rectangles and other labels, in angular units; 0 = clear
     var dep = Math.max(-p.z, 1), lx = (p.x + e.ox) / dep, ly = (p.y + e.oy) / dep, hw = e.hw / dep, hh = e.hh / dep, pen = 0;
@@ -892,7 +892,7 @@ function placeRoomLabel(c, A, B) {   // room scale: the selected link's label si
     c.label.textFill.color = new vec4(kk.r, kk.g, kk.b, labelAlpha);
 }
 function updateLabel(c) {
-    var shown = labelsAll || editorLink === c;
+    var shown = labelsAll || (editorLink === c && !roomMode());   // room: the open rule panel already names the rule, so no floating label
     c.labelObj.enabled = shown && c.active;
     if (!shown) { c.lblRect = null; c.labelNudge = 0; return; }
     var A = c.A.pos, B = c.B.pos;
@@ -937,6 +937,29 @@ function arcTarget(c) {   // signed arc height multiplier (presentation only): b
     }
     return 1;
 }
+function beamClip(c, amt, A, B, perp, dist) {   // how much a beam with this arc multiplier would pass through other objects (angular overlap with their discs); 0 = clear
+    var h = Math.min(0.12 * dist, 4 * K) * amt, mid = A.add(B).uniformScale(0.5), C = mid.add(perp.uniformScale(2 * h)), pen = 0;
+    for (var ni = 0; ni < nodes.length; ni++) {
+        var n = nodes[ni]; if (n === c.A || n === c.B) { continue; }
+        var nd = Math.max(-n.pos.z, 1), nx = n.pos.x / nd, ny = n.pos.y / nd, nr = n.radius * 0.8 / nd + 0.004;
+        for (var si = 1; si < 10; si++) {
+            var q = beamPoint(A, C, B, si / 10), qd = Math.max(-q.z, 1), ex = q.x / qd - nx, ey = q.y / qd - ny, dd = Math.sqrt(ex * ex + ey * ey);
+            if (dd < nr) { pen += nr - dd; }
+        }
+    }
+    return pen;
+}
+function routeArc(c, pref, A, B, perp, dist) {   // presentation only: keep the neighbour-separation preference unless the beam would run through another object, then bend the other way or higher
+    if (nodes.length < 3) { return pref; }
+    var cands = [c.arcT === undefined ? pref : c.arcT, pref, -pref, pref * 1.8, -pref * 1.8, pref * 2.6, -pref * 2.6], best = pref, bestPen = 1e9;
+    for (var i = 0; i < cands.length; i++) {
+        var pen = beamClip(c, cands[i], A, B, perp, dist);
+        if (pen < 0.0005) { best = cands[i]; bestPen = 0; break; }
+        if (pen < bestPen - 1e-6) { bestPen = pen; best = cands[i]; }
+    }
+    c.arcT = best; c.arcClip = bestPen;
+    return best;
+}
 function updateVisual(c) {
     if (!perf.beams) { return; }
     var A = c.A.pos, B = c.B.pos;
@@ -956,7 +979,7 @@ function updateVisual(c) {
     }
     var w = Math.max(0.45 * K, Math.min(c.A.radius, c.B.radius) * (roomMode() ? 0.07 : 0.16)) * (1 + 1.2 * pk);   // thin beam: ~1 cm in the room (objects are 2.4x bigger on screen, so the same 0.16 radius ratio read as a fat band); never thinner than 0.45 cm at stage scale
     // gentle arc: always bulges to the left of A -> B, so it never flips side while objects move
-    var arcT = arcTarget(c); c.arcAmt = c.arcAmt === undefined ? arcT : c.arcAmt + (arcT - c.arcAmt) * (1 - Math.exp(-8 * Math.max(lastDt, 0.016)));
+    var perp0 = new vec3(-dir.y, dir.x, 0), arcT = roomMode() ? routeArc(c, arcTarget(c), A, B, perp0, dist) : arcTarget(c); c.arcAmt = c.arcAmt === undefined ? arcT : c.arcAmt + (arcT - c.arcAmt) * (1 - Math.exp(-8 * Math.max(lastDt, 0.016)));
     var perp = new vec3(-dir.y, dir.x, 0), h = Math.min(0.12 * dist, 4 * K) * c.arcAmt;
     var mid = A.add(B).uniformScale(0.5), C = mid.add(perp.uniformScale(2 * h));
     c.arcC = C;
@@ -1179,7 +1202,7 @@ function updateCard() {
         var hw = w / 2 / CARD.d, hh = h / 2 / CARD.d, best = null, bestC = 1e9, m = 1.0 / CARD.d;
         for (var ci = 0; ci < 2; ci++) {
             var side = ci === 0 ? cardCorner : -cardCorner, ax = side * (v.halfW / 95 - hw - m), ay = v.halfH / 95 - hh - m;
-            for (var gy = ay; gy >= toolbarTopAng + hh; gy -= step) {
+            for (var gy = ay; gy >= tbTop() + hh; gy -= step) {
                 for (var gx = ax; Math.abs(gx) <= v.halfW / 95 - hw; gx -= side * step) {
                     var c = Math.hypot(gx - ax, gy - ay) + ci * 0.4;
                     if (c < bestC && !blocked(gx, gy, hw, hh)) { best = { x: gx, y: gy, corner: side }; bestC = c; }
@@ -1255,7 +1278,7 @@ function editorObstacles(withNodes, skipCard) {   // everything the panel must k
 }
 function editorBlocked(cx, cy, hw, hh, ob, margin) {
     var v = script.api.view(), m = margin / EDITOR.d;
-    if (Math.abs(cx) + hw > v.halfW / 95 - m || cy + hh > v.halfH / 95 - m || cy - hh < toolbarTopAng + m) { return true; }
+    if (Math.abs(cx) + hw > v.halfW / 95 - m || cy + hh > v.halfH / 95 - m || cy - hh < tbTop() + m) { return true; }
     for (var i = 0; i < ob.discs.length; i++) {
         var d = ob.discs[i], dx = Math.max(Math.abs(cx - d.x) - hw, 0), dy = Math.max(Math.abs(cy - d.y) - hh, 0), rr = d.r + m;
         if (dx * dx + dy * dy < rr * rr) { return true; }
@@ -1297,7 +1320,7 @@ function updateEditor() {
     if (!best) { ob2 = editorObstacles(false); scan(ob2); overlap = !!best; }   // crowded: keep clear of labels and the toolbar at least
     if (!best) {
         var L0 = EDITOR.layouts[1], h0 = L0.w / 2 / EDITOR.d, k0 = L0.h / 2 / EDITOR.d;
-        best = { x: Math.max(-v.halfW / 95 + h0, Math.min(v.halfW / 95 - h0, mx)), y: Math.max(toolbarTopAng + k0, Math.min(v.halfH / 95 - k0, my)), li: 1, hw: h0, hh: k0 }; overlap = true;
+        best = { x: Math.max(-v.halfW / 95 + h0, Math.min(v.halfW / 95 - h0, mx)), y: Math.max(tbTop() + k0, Math.min(v.halfH / 95 - k0, my)), li: 1, hw: h0, hh: k0 }; overlap = true;
     }
     if (editorRect && !overlap) {   // stay put (same layout) unless a clearly better spot exists
         var cur = EDITOR.layouts[editorRect.li], chw = cur.w / 2 / EDITOR.d, chh = cur.h / 2 / EDITOR.d;
@@ -1308,7 +1331,8 @@ function updateEditor() {
     editorRect = { x: best.x, y: best.y, hw: best.hw, hh: best.hh, li: best.li, overlap: overlap };
 }
 script.api.setToolbarTop = function (ang) { toolbarTopAng = ang; };
-script.api.toolbarTop = function () { return toolbarTopAng; };
+script.api.toolbarTop = function () { return tbTop(); };
+function tbTop() { return roomMode() ? Math.max(toolbarTopAng, SIDEBOARD_TOP) : toolbarTopAng; }   // room: floating panels also stay above the sideboard line (the sideboard strip is where the objects stand)
 script.api.editorSpec = EDITOR;
 script.api.editorRules = function () { return ALL_RULES.map(function (r) { var k = RULE_COLOR[r]; return { rule: r, name: EDITOR_NAMES[r], color: [k.r, k.g, k.b] }; }); };
 script.api.editorInfo = function () { return editorLink && editorRect ? { x: editorRect.x, y: editorRect.y, rule: editorLink.rule, layout: editorRect.li } : null; };
@@ -1399,10 +1423,10 @@ script.api.loadUniverse = loadUniverse;
 // The story runs through the real rule engine: cat-lantern ATTRACT, lantern-flower COLLISION TRIGGER. Press Play and the cat travels to the lantern;
 // drag the lantern into the flower and the collision's pulse flips cat-lantern to REPEL, so the cat flees back toward the house. Nothing collides by itself.
 var ROOM_LAYOUT = {   // hero sizes 20-40 cm; centres in cm, all about 1.25 m out, inside the default Preview view (+-36 cm wide, -24..+41 cm tall at that depth, above the toolbar); table-resting items sit on FLOOR_Y (the virtual table)
-    home: { size: 28, x: -21, y: 26, z: -125 },        // floating island house, high on the left, behind the cat on the side away from the lantern
-    cat: { size: 26, x: -22, y: null, z: -125 },       // on the table, left
-    lantern: { size: 22, x: 14, y: 14, z: -125 },      // floating between and above
-    flower: { size: 24, x: 24, y: null, z: -125 }      // on the table, right
+    home: { size: 28, x: -21, y: 24, z: -125 },        // floating island house, high on the left, behind the cat on the side away from the lantern
+    cat: { size: 26, x: -22, y: null, z: -125 },       // standing on the sideboard, left
+    lantern: { size: 22, x: 16, y: 10, z: -125 },      // floating above the sideboard, right of centre
+    flower: { size: 24, x: 4, y: null, z: -125 }       // standing on the sideboard, centre (the toolbar is low in the far right corner)
 };
 function loadRoom() {
     clearAll();
@@ -1518,7 +1542,7 @@ script.api.test = {
         var ob = editorObstacles(true, true), r = cardRect, n = 0, v = script.api.view();
         ob.discs.forEach(function (d) { var dx = Math.max(Math.abs(r.x - d.x) - r.hw, 0), dy = Math.max(Math.abs(r.y - d.y) - r.hh, 0); if (dx * dx + dy * dy < d.r * d.r) { n++; } });
         ob.rects.forEach(function (o) { if (Math.abs(r.x - o.x) < r.hw + o.hw && Math.abs(r.y - o.y) < r.hh + o.hh) { n++; } });
-        if (Math.abs(r.x) + r.hw > v.halfW / 95 || r.y + r.hh > v.halfH / 95 || r.y - r.hh < toolbarTopAng) { n++; }
+        if (Math.abs(r.x) + r.hw > v.halfW / 95 || r.y + r.hh > v.halfH / 95 || r.y - r.hh < tbTop()) { n++; }
         return n;
     },
     openEditor: openEditor, closeEditor: function () { closeEditor("test"); }, editorTouch: editorTouch, toggleEditor: toggleEditor,
@@ -1529,7 +1553,7 @@ script.api.test = {
         var ob = editorObstacles(true), r = editorRect, n = 0, v = script.api.view();
         ob.discs.forEach(function (d) { var dx = Math.max(Math.abs(r.x - d.x) - r.hw, 0), dy = Math.max(Math.abs(r.y - d.y) - r.hh, 0); if (dx * dx + dy * dy < d.r * d.r) { n++; } });
         ob.rects.forEach(function (o) { if (Math.abs(r.x - o.x) < r.hw + o.hw && Math.abs(r.y - o.y) < r.hh + o.hh) { n++; } });
-        if (Math.abs(r.x) + r.hw > v.halfW / 95 || r.y + r.hh > v.halfH / 95 || r.y - r.hh < toolbarTopAng) { n++; }
+        if (Math.abs(r.x) + r.hw > v.halfW / 95 || r.y + r.hh > v.halfH / 95 || r.y - r.hh < tbTop()) { n++; }
         return n;
     },
     editorMid: function () { var c = editorLink; if (!c) { return null; } var m = c.A.pos.add(c.B.pos).uniformScale(0.5), d = Math.max(-m.z, 1); return { x: m.x / d, y: m.y / d }; },
@@ -1563,6 +1587,9 @@ script.api.test = {
     connect: function (i, j, rule) { var c = slotFor(nodes[i], nodes[j], true); if (!c.active) { activateLink(c, rule || RULES.ATTRACT, true); } return c; },
     labelInfo: function (c) { var e = labelExtent(c); var p = c.labelTr.getWorldPosition(); return { ext: e, nudge: c.labelNudge, y: p.y, hits: e ? labelHitsNode(p, e, c) : null }; },
     labelToMid: function (c) { var C = c.arcC || c.A.pos.add(c.B.pos).uniformScale(0.5), M = beamPoint(c.A.pos, C, c.B.pos, 0.5), e = labelExtent(c), p = c.labelTr.getWorldPosition(); if (!e) { return -1; } var dx = p.x + e.ox - M.x, dy = p.y + e.oy - M.y; return Math.sqrt(dx * dx + dy * dy); },
+    visualBottom: function (i) { var n = nodes[i], b = n && n.modelRoot ? worldBounds(n.modelRoot) : null; return b ? b.min.y : null; },
+    beamClipNow: function (c) { var A = c.A.pos, B = c.B.pos, d = B.sub(A), dist = Math.max(d.length, 0.01), dir = d.uniformScale(1 / dist); return beamClip(c, c.arcAmt === undefined ? 1 : c.arcAmt, A, B, new vec3(-dir.y, dir.x, 0), dist); },
+    beamClip: function (c) { return c.arcClip === undefined ? 0 : c.arcClip; },
     labelFits: function (c) { var e = labelExtent(c); return !!e && labelInView(c.labelTr.getWorldPosition().add(new vec3(e.ox, e.oy, 0)), e); },
     armHaloOn: function () { return !!armHalo && armHalo.enabled; },
     fires: function (c) { return c.fires || 0; },
@@ -1649,7 +1676,7 @@ script.createEvent("OnStartEvent").bind(function () {
 });
 
 // ---------- No stage: the world is the user's room (see ROOM / FLOOR_Y / TABLE_Y above). The glowing placement disc was removed; objects rest on real surfaces or float. ----------
-script.api.nodeDiscs = function () { return nodes.map(function (n) { var dp = Math.max(-n.pos.z, 1); return { x: n.pos.x / dp, y: n.pos.y / dp, r: n.radius / dp }; }); };   // angular discs, so the Create menu can open in empty space
+script.api.nodeDiscs = function () { return nodes.map(function (n) { var dp = Math.max(-n.pos.z, 1); return { x: n.pos.x / dp, y: n.pos.y / dp, r: n.radius * 0.85 / dp }; }); };   // (85%: the visible model is smaller than its bounding sphere) angular discs, so the Create menu can open in empty space
 script.api.view = function () {   // visible half-extents (cm) at the world's depth, for placing UI at the edges
     var c = script.camera, hh = Math.tan(c.fov / 2) * Math.abs(WORLD_Z);
     return { halfW: hh * c.aspect, halfH: hh, stageR: STAGE_R };
@@ -1775,6 +1802,10 @@ function swapInModel(job, gltf) {
     ht.setLocalScale(vec3.one().uniformScale(f));
     ht.setWorldPosition(nodeW.sub(off.uniformScale(f)));
     var b2 = worldBounds(holder);
+    if (roomMode() && b2) {   // ground it: the model's lowest point sits exactly on the bottom of its collision sphere, so a body resting on a surface visibly touches it
+        var gap = b2.min.y - (nodeW.y - n.size * 0.5);
+        if (gap > 0.01) { ht.setWorldPosition(ht.getWorldPosition().sub(new vec3(0, gap, 0))); b2 = worldBounds(holder); }
+    }
     n.mBase = { p: ht.getLocalPosition(), r: ht.getLocalRotation(), s: ht.getLocalScale() };   // procedural life animates around this
     // collider sized from the fitted bounds (sphere radius is in node-local units)
     var col = n.obj.getComponent("Component.ColliderComponent");

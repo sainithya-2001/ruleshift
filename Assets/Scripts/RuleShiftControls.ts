@@ -30,6 +30,8 @@ const DARK = new vec4(0.12, 0.14, 0.27, 1) // additive display: pure black would
 const PILL = new vec4(0.12, 0.3, 0.8, 1) // saturated blue: stays legible against bright rooms
 const WHITE = new vec4(1, 1, 1, 1)
 const MENU_BACK = new vec4(0.2, 0.26, 0.56, 1) // menu backing: as bright as a dark plate can be on an additive display, so the room behind is lifted and reads as quiet
+const TB_PILL = new vec4(0.12, 0.3, 0.8, 0.6) // toolbar pills: lower opacity so the room (the sideboard) stays visible through them
+const TB_DARK = new vec4(0.12, 0.14, 0.27, 0.12)
 const ACCENT = new vec4(0.1, 0.55, 1.0, 1)
 const ARMED = new vec4(0.35, 0.92, 1.0, 1) // Connect armed: a bright cyan fill, clearly different from the blue pills
 
@@ -69,6 +71,7 @@ export class RuleShiftControls extends BaseScriptComponent {
   private toolbarLabels: string[] = []
   private toolbarCenters: number[] = []
   private pillWidth = 9
+  private pillH = 6.3
   private fitStage = 0
   private fitFrame = 0
   private labelFit: {label: string; width: number; allowed: number; height: number; allowedH: number}[] = []
@@ -106,6 +109,7 @@ export class RuleShiftControls extends BaseScriptComponent {
   private connectPlate: SceneObject
   private connectPill: Pill
   private connectHint: Text
+  private editorWidths: number[] = []
   private createW = 16
   private createH = 20
   private createTop = 0
@@ -175,30 +179,32 @@ export class RuleShiftControls extends BaseScriptComponent {
   // ---- Toolbar: three big icon-first pills [Create] [Play/Pause] […], low in the view and following the head with a smoothed lag ----
   private buildToolbar() {
     const api = this.controller.api
-    const h = 6.3
+    const h = 5.0
     const defs = [
       {label: "Create", icon: this.iconAdd},
       {label: "Play", icon: this.iconPlay},
       {label: "…", icon: null as Texture | null},
     ]
-    const gap = 0.8
-    const statusH = 3.2 // a thin band above the pills for the Building / Running / Paused indicator
-    const pw = 10.5
+    const gap = 0.5
+    const statusH = 2.2 // a thin band above the pills for the Building / Running / Paused indicator
+    const pw = 5.8
     this.pillWidth = pw
+    this.pillH = h
     const total = pw * 3 + gap * 2
-    const y = -this.halfH + 0.8 + h / 2
+    const x0 = this.halfW - 0.5 - total // low in the bottom-right corner, clear of the sideboard objects (the room's centre and left stay free)
+    const y = -this.halfH + 0.6 + h / 2
     this.toolbarRoot = global.scene.createSceneObject("Toolbar Root")
-    const plateH = h + 1.2 + statusH
+    const plateH = h + 1.0 + statusH
     const plateY = y + statusH / 2
-    const plate = api.makePlate("Toolbar Strip", total + 1.4, plateH, 0.4, new vec3(0, plateY, Z - 1.2), DARK, -8)
+    const plate = api.makePlate("Toolbar Strip", total + 1.4, plateH, 0.4, new vec3(x0 + total / 2, plateY, Z - 1.2), TB_DARK, -8)
     plate.setParent(this.toolbarRoot)
     this.toolbarPlateTop = plateY + plateH / 2
-    api.setToolbarTop(this.toolbarPlateTop / (-Z + 1.2)) // top edge of the toolbar in angular space: the rule editor panel stays above it
-    let x = -total / 2
+    api.setToolbarTop(this.toolbarPlateTop / (-Z + 1.2)) // top edge of the toolbar in angular space (room mode also keeps panels above the sideboard line)
+    let x = x0
     const pills: Pill[] = []
     defs.forEach((d, i) => {
       const cx = x + pw / 2
-      const pl = api.makePlate("Pill " + d.label, pw, h, 0.4, new vec3(cx, y, Z - 0.8), PILL, -7)
+      const pl = api.makePlate("Pill " + d.label, pw, h, 0.4, new vec3(cx, y, Z - 0.8), TB_PILL, -7)
       pl.setParent(this.toolbarRoot)
       pills.push(this.makePill(this.toolbarRoot, "Pill" + i, d.label, d.icon, new vec3(cx, y, Z + 0.5), new vec2(pw, h), TOOLBAR_TEXT_PROBE, false, 1.9, true))
       this.toolbarLabels.push(d.label)
@@ -277,7 +283,7 @@ export class RuleShiftControls extends BaseScriptComponent {
       const g = 0.4
       const pad = 0.6
       const hh = ph * 3 + g * 2 + pad * 2
-      const cx = this.toolbarCenters[2]
+      const cx = Math.min(this.toolbarCenters[2], this.halfW - (pwid + pad * 2) / 2 - 0.4)
       this.moreMenu = global.scene.createSceneObject("More Menu")
       this.moreMenu.setParent(this.toolbarRoot)
       const pl = api.makePlate("More Plate", pwid + pad * 2, hh, 0.4, new vec3(cx, top + hh / 2, Z - 1.2), MENU_BACK, -8, true)
@@ -302,11 +308,11 @@ export class RuleShiftControls extends BaseScriptComponent {
     {
       const W = 16.2
       const pad = 0.9
-      const ih = 3.4
-      const hdr = 2.2
+      const ih = 3.0
+      const hdr = 1.9
       const saved: string[] = api.savedModels()
       const savedRows = Math.max(1, Math.ceil(saved.length / 2))
-      const hh = pad + hdr + 0.3 + ih + 0.7 + hdr + 0.3 + savedRows * (ih + 0.7) + 3.4 + pad
+      const hh = pad + hdr + 0.3 + ih + 0.5 + hdr + 0.3 + savedRows * (ih + 0.5) + 3.0 + pad
       const cx = 0
       this.createMenu = global.scene.createSceneObject("Create Menu")
       this.createMenu.setParent(this.toolbarRoot)
@@ -331,7 +337,7 @@ export class RuleShiftControls extends BaseScriptComponent {
           const p = this.makePill(this.createMenu, "Create" + it.label, it.label, it.icon, new vec3(px, yy - ih / 2, Z + 0.5), new vec2(w, ih), text)
           p.button.onTriggerUp.add(it.fn)
         })
-        yy -= ih + 0.7
+        yy -= ih + 0.5
       }
       header("Imagine something new")
       row(
@@ -350,9 +356,9 @@ export class RuleShiftControls extends BaseScriptComponent {
         )
       }
       // the old palette stays reachable, collapsed behind one wide pill
-      const bp = api.makePlate("Create Opt Basic", inner, 3.4, 0.2, new vec3(cx, yy - 1.7, Z - 0.8), PILL, -7, true)
+      const bp = api.makePlate("Create Opt Basic", inner, 3.0, 0.2, new vec3(cx, yy - 1.5, Z - 0.8), PILL, -7, true)
       bp.setParent(this.createMenu)
-      this.basicPill = this.makePill(this.createMenu, "CreateBasic", "Basic building blocks  ▸", null, new vec3(cx, yy - 1.7, Z + 0.5), new vec2(inner, 3.4), 38)
+      this.basicPill = this.makePill(this.createMenu, "CreateBasic", "Basic building blocks  ▸", null, new vec3(cx, yy - 1.5, Z + 0.5), new vec2(inner, 3.0), 38)
       this.basicPill.button.onTriggerUp.add(() => {
         this.closeMenus()
         this.setPalette(true)
@@ -439,7 +445,7 @@ export class RuleShiftControls extends BaseScriptComponent {
     this.fitFrame++
     if (this.fitStage === 2 || this.fitFrame < 6) return
     const allowed = this.pillWidth - 0.6 - 0.4 // padding plus a small safety margin
-    const allowedH = 6.3 - 0.8 - 1.9 - 0.2 - 0.3 // pill height minus padding, icon, spacing and a margin: the room left for one line of text
+    const allowedH = this.pillH - 0.8 - 1.9 - 0.2 - 0.3 // pill height minus padding, icon, spacing and a margin: the room left for one line of text
     const boxes = this.toolbarPills.map((p) => this.labelBox(p))
     if (boxes.some((b) => !(b.w > 0) || !(b.h > 0))) return // layout not ready yet; try again next frame
     const widths = boxes.map((b) => b.w)
@@ -448,7 +454,7 @@ export class RuleShiftControls extends BaseScriptComponent {
       boxes.forEach((b) => (size = Math.min(size, Math.floor(TOOLBAR_TEXT_PROBE * 0.92 * Math.min(allowed / b.w, allowedH / b.h)))))
       size = Math.max(TOOLBAR_TEXT_MIN, size)
       this.labelTextSize = size
-      this.toolbarPills.forEach((p, i) => (p.content.textSize = this.toolbarLabels[i] === "…" ? Math.round(size * 1.45) : size)) // the lone ellipsis glyph is tiny at word size
+      this.toolbarPills.forEach((p, i) => (p.content.textSize = this.toolbarLabels[i] === "…" ? Math.min(Math.round(size * 1.3), Math.floor(TOOLBAR_TEXT_PROBE * 0.97 * allowedH / boxes[i].h)) : size)) // larger, but never taller than the pill allows // the lone ellipsis glyph is tiny at word size
       this.fitStage = 1
       this.fitFrame = 0 // re-measure a few frames later, once the new size has laid out
       return
@@ -890,7 +896,7 @@ export class RuleShiftControls extends BaseScriptComponent {
     rules.forEach((r: any, i: number) => {
       const border = api.makePlate("Rule Border " + r.rule, E.pillW + 0.5, E.pillH + 0.5, 0.2, new vec3(0, 0, Z), WHITE, -6)
       const fill = api.makePlate("Rule Fill " + r.rule, E.pillW, E.pillH, 0.2, new vec3(0, 0, Z), PILL, -5)
-      const pill = this.makePill(this.editorRoot, "Rule" + i, r.name, null, new vec3(0, 0, 0.5), new vec2(E.pillW, E.pillH), 42, true)
+      const pill = this.makePill(this.editorRoot, "Rule" + i, r.name, null, new vec3(0, 0, 0.5), new vec2(E.pillW, E.pillH), 38, true) // 38: even "✓ Collision Trigger" stays inside the 8 cm pill (at 42 the longest label with its check mark ran to the pill edge)
       pill.button.onTriggerUp.add(() => this.controller.api.applyEditorRule(r.rule))
       pill.button.onInitialized.add(() => {
         pill.button.opacity = 0 // the Button's own grey plate would cover the rule colours drawn behind it
@@ -901,6 +907,8 @@ export class RuleShiftControls extends BaseScriptComponent {
     api.test.editorPills = () => this.editorRows.map((row) => ({rule: row.rule, selected: row.border.enabled, fill: this.fillColor(row)}))
     api.test.pressEditorPill = (i: number) => this.controller.api.applyEditorRule(this.editorRows[i].rule)
     api.test.editorShown = () => this.editorShown
+    api.test.editorFit = () => ({widths: this.editorWidths.slice(), pill: E.pillW})
+    api.test.editorFitReset = () => (this.editorWidths = [])
     api.test.togglePalette = (on: boolean) => this.setPalette(on)
   }
 
@@ -932,18 +940,17 @@ export class RuleShiftControls extends BaseScriptComponent {
       this.closeMenus()
       this.setEditorShown(true)
     }
-    if (this.editorTextFit < 8) {
-      // labels never wrap ("Collision Trigger" stays on one line); report the measured widths once
-      this.editorTextFit++
-      const ws = this.editorRows.map((row) => {
-        const tc: Text | null = (row.pill.content as any).textComponent
-        if (!tc) return -1
-        tc.horizontalOverflow = HorizontalOverflow.Overflow
-        const bb = tc.getBoundingBox()
-        return bb.right - bb.left
-      })
-      if (this.editorTextFit === 8) print("RULESHIFT editor labels width cm: " + ws.map((w) => w.toFixed(2)).join(", ") + " (pill " + E.pillW + ")")
-    }
+    // labels never wrap ("Collision Trigger" stays on one line): measure every row each frame and keep the widest seen (a selected row carries a check mark); report once
+    this.editorTextFit++
+    const ws = this.editorRows.map((row) => {
+      const tc: Text | null = (row.pill.content as any).textComponent
+      if (!tc) return -1
+      tc.horizontalOverflow = HorizontalOverflow.Overflow
+      const bb = tc.getBoundingBox()
+      return bb.right - bb.left
+    })
+    this.editorWidths = ws.map((w, i) => Math.max(w, this.editorWidths[i] || 0))
+    if (this.editorTextFit === 8) print("RULESHIFT editor labels width cm: " + ws.map((w) => w.toFixed(2)).join(", ") + " (pill " + E.pillW + ")")
     const c = new vec3(info.x * E.d, info.y * E.d, -E.d)
     this.editorRoot.getTransform().setWorldPosition(c)
     const L = E.layouts[info.layout]

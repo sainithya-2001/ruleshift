@@ -1,6 +1,6 @@
 # Status (room-scale build and UI stage done)
 
-**Tests:** 342/342 PASS on the sim clock (sections 0-24 at legacy scale K=1, section 25 at room scale). **Room-scale build:** complete in the controller; see below.
+**Tests:** 361/361 PASS (see the final-presentation section; this line was 342/342 before the UI stage) on the sim clock (sections 0-24 at legacy scale K=1, section 25 at room scale). **Room-scale build:** complete in the controller; see below.
 
 ## Room scale (what changed)
 - World scale `K = ROOM_K = 2.4`: every distance, speed, force, threshold and size is multiplied by K. `api.test.setWorldScale(1)` restores the legacy 46 cm stage so the original regression suite still runs (the suite starts with it); section 25 switches to ROOM_K. In the room, link rest gap is 6 cm (not K-scaled) and the repel range is 48 cm (`gapK()`, `repK()`), so a compact layout still has room to travel.
@@ -39,6 +39,15 @@ Cat-lantern 43.8 -> 29.0 cm in 8 sim s on Play; drag lantern into flower: pulse,
 
 ## Presentation fixes (screenshots `devpost/screenshots/fix*.jpg`; 351/351 tests)
 1. Selected-link label sits beside its own beam midpoint (room mode); in crowded spots it slides sideways along the beam (about 14 cm), picking the least-overlapping spot. 2. Beams from one node in similar directions arc to opposite sides, taller per extra link. 3. Create menu is compact (16 cm), opens above the toolbar slid sideways to cover no object (penetration 0), with a brighter navy backing. Limit: the Preview simulates an additive display, so the backing cannot be fully opaque there. 4. Connect armed: bright cyan fill, "Tap another object" hint, selected object haloed; fixed latent bug where the next selection after a cancel appeared pre-armed. Story beat: after the flee, cat-lantern set to Attract goes 50.9 -> 28.5 cm (cat moves 17.0 cm). Scenario code removed; test flags off.
+
+## Final presentation fixes (screenshots `devpost/screenshots/final-*.jpg`; 361/361 tests)
+- **Sideboard grounding.** The room preset now stands on the real sideboard of the Sunlit Room Preview: `TABLE_Y_ROOM = FLOOR_Y = -37.5` (the thin top strip at the bottom of the default view, back edge at angular -0.277 = `SIDEBOARD_TOP`; calibrated from a Preview screenshot, 0.0509 cm per pixel at 1.25 m). Cat (x -22) and flower (x 4) stand on it, lantern floats at (16, 10), island house floats at (-21, 24). In room mode `swapInModel` drops each model so its lowest point touches the bottom of its collision sphere, so a body resting on the floor visibly touches it (`api.test.visualBottom`). `ROOM.zNear` is -116 so a floor-standing object never drops below the bottom of the view. Story re-checked: cat-lantern 51.4 -> 28.8 cm in 4 s (cat climbs off the sideboard toward the lantern), flee after the drag-into-flower flip (cat back on the sideboard at x -23, cat-lantern 49.1), switch back to Attract 49.1 -> 29.3 cm (cat moved 14.8 cm).
+- **Toolbar.** Three pills 5.8 x 5.0 cm, translucent (pills alpha 0.6, strip alpha 0.12), low in the bottom-right corner; menus anchor to it (More menu clamped inside the view). `tbTop()` in the controller keeps floating panels above the sideboard line in room mode.
+- **Flower.** The room's flower is a refine:true Snap3D "a glowing pink lotus flower" (30 s), decimated to 9,000 triangles with Blender (same pipeline as before) and saved over `Assets/RULESHIFT Models/flower.glb` (same asset reference, so the room preset, the Create menu's "Flower" and the scene input all use it).
+- **Labels / panel.** In room mode the selected link shows no floating label (the open rule panel already names the rule; fixes the lone top-left "ATTRACT"). The label placement code remains for the test hook `labelsAll`. The rule panel still places beside the link's midpoint (`updateEditor`); its pill text is 38 so "✓ Collision Trigger" and "Transfer" fit; panels stay above the sideboard line, so the toolbar can no longer hide the lowest row.
+- **Beams.** `routeArc` / `beamClip` (room mode): every frame a beam picks the arc multiplier (keeping the neighbour-separation preference first, then opposite side, then taller) that does not run through another object (`api.test.beamClipNow`).
+- Create menu made more compact (14-16 cm) and its disc test uses 85% of each bounding sphere (the visible model is smaller); the "..." glyph size is capped by the pill height.
+- The Preview's default panel is wider than `api.view()` (the code assumes 36 cm half width at 1.25 m, the panel shows about 42 cm); everything is placed with the conservative value.
 
 ## Workflow rules
 - Tests must pass before each commit; commit and push per step; retune test values, never delete checks; keep reports short.
