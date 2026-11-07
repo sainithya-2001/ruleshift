@@ -29,13 +29,16 @@
   PackagePolicy: CanBeUnpacked
   ScriptInputsHidden:
     controller: false
+    genModels: false
     liveImagine: false
     liveImaginePrompt: false
+    roomPlay: false
     runTests: false
     shotsPulses: false
     showCause: false
     showEditor: false
     showGrow: false
+    showRoom: false
     showShots: false
     showUniverse: false
   ScriptTypesHidden:
@@ -50,8 +53,11 @@
     - controller: !<reference.ScriptComponent> 00000000-0000-0000-0000-000000000000
       runTests: false
       liveImagine: false
+      genModels: false
       showCause: false
       showUniverse: false
+      showRoom: false
+      roomPlay: false
       showEditor: false
       showGrow: false
       showShots: false

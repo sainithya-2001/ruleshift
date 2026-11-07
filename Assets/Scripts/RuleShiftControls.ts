@@ -473,8 +473,11 @@ export class RuleShiftControls extends BaseScriptComponent {
     this.deleteObj.enabled = true
     this.deletePlate.enabled = true
     // above the object, drawn at a nearer depth (same screen position) so nothing can cover it
-    const q = new vec3(info.x, Math.min(info.y + info.r + 3.2, this.halfH - 4), info.z)
+    // (the gap and the top clamp are in the UI plane's angular units, so objects at any room depth get the same on-screen gap)
+    const depthK = Math.max(-info.z, 1) / -Z
+    const q = new vec3(info.x, info.y + info.r + 3.2 * depthK, info.z)
     const nearer = q.uniformScale(70 / -q.z)
+    nearer.y = Math.min(nearer.y, (this.halfH - 4) * (70 / -Z))
     this.deleteObj.getTransform().setWorldPosition(nearer)
     this.deletePlate.getTransform().setWorldPosition(new vec3(nearer.x, nearer.y, nearer.z - 0.6))
     // tell the controller where the pill is on screen so link labels keep clear of it (angular space: the pill is drawn at depth 70)

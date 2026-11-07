@@ -1,6 +1,22 @@
-# Status (updated after the visual pass)
+# Status (room-scale build done; UI stage next)
 
-**Latest code commit:** `b167d67` Visual pass (curved beams, procedural model life, ambient sparkles). **Tests:** 308/308 PASS on the sim clock.
+**Tests:** 321/321 PASS on the sim clock (sections 0-24 at legacy scale K=1, section 25 at room scale). **Room-scale build:** complete in the controller; see below.
+
+## Room scale (what changed)
+- World scale `K = ROOM_K = 2.4`: every distance, speed, force, threshold and size is multiplied by K. A K-times copy of the stage dynamics keeps the same timing. `api.test.setWorldScale(1)` restores the legacy 46 cm stage so the original 308-check regression suite still runs (the suite starts with it); section 25 switches to ROOM_K.
+- Stage disc removed. Room volume `ROOM = {x:110, yMax:80, zNear:-45, zFar:-260}`, floor `FLOOR_Y=-150`, virtual table plane `y=-75` (`TABLE_RECT`) used when WorldQuery has no hit. Placement rests objects on the surface.
+- Measured in the Sunlit Room Preview (camera at the origin, eye about 1.5 m): no real table within 2 m (coffee table about 3.2 m away); runtime view about 32 x 37 degrees (tan x 0.289, tan y 0.331). So the layout is compact in angle, and the floor is only visible when the Preview camera pitches down about 18-26 degrees (MovePreviewCamera).
+- `demoStage="room"` layout (`ROOM_LAYOUT`): house 40 cm at (-26,-18,-165), cat 28 cm on the floor (-12,floor,-205), lantern 24 cm (28,-70,-150), flower 26 cm on the floor (30,floor,-205). Floor items are about 2 m out in depth (not 0.5-2 m exactly; the floor is 1.5 m below the eye).
+- Visual pass at scale: thin beams (0.07 radius ratio in the room), depth-scaled labels, captions above their node, Delete pill depth-aware, ambient sparkles scaled. Embers VFX follow the lantern and Sparkles VFX hover over the flower (`embersVfx`/`sparklesVfx` inputs; assets in `Assets/` from the Asset Library).
+- Models: regenerated with Snap3D refine:true (2 rounds each, 8 candidates). Kept: house from round 2 and lantern from round 1 (now `house.glb`, `lantern.glb`); cat and flower kept from the original set (the refined ones were paler or lost the glow). Candidates deleted. `Snap3DGenerator.ts` accepts `opts.refine`; the `genModels` flag on the tests object reruns the comparison.
+- Screenshots: `devpost/screenshots/room-before-play.jpg` and `room-chase.jpg` (taken with the Preview camera pitched -18 degrees; the second is after the collision, the blue REPEL beam and the cat heading home).
+- Flags added on the tests object: `showRoom` (loads the room, prints per-node angles and an fps line every 5 s) and `roomPlay` (adds Play, the lantern drag and a flip marker). Keep off when committing.
+
+## fps (honest)
+Preview fps readings with Lens Studio NOT focused were 0.4-3.4 fps (the Preview throttles). I could not focus the window programmatically, so a focused fps figure has not been measured. To measure: turn on `showRoom`, click the Lens Studio window, and read the `RULESHIFT ROOM fps` log lines.
+
+## UI stage (next, not started)
+Object-anchored contextual panels plus one smoothed head-follow toolbar (decision from the user). Today the toolbar/editor/card are world-fixed at `WORLD_Z=-95` and overlap content when the view pitches. Also pending from the locked direction: Discoveries off by default, palette under Create, voice inside Create.
 
 ## Workflow rules
 - Tests must pass before each commit; commit and push per step; retune test values, never delete checks; keep reports short.
@@ -18,17 +34,19 @@ Five rules (Attract, Repel, Collision Trigger, Transfer, Grow); contextual rule 
 - `""` (default): empty stage with the placement hint.
 - `chain`: three spheres (gem, orb, cube) spread across the stage with Attract, Repel and On Collision links so one collision flips another rule.
 - `universe`: four saved Snap3D models from `Assets/RULESHIFT Models/` (house on a floating island 1.5x heavy, cat 0.7x light, lantern, flower). Cat-lantern Attract, lantern-flower Collision Trigger, cat-home Attract. Hand-triggered: the cat chases the lantern (about 10 cm); drag the lantern into the flower, the pulse flips cat-lantern to Repel and the cat is pushed home. No token needed.
-- Test-only scene flags on the tests object: `showUniverse`, `showEditor`, `showGrow`, `showShots`, `shotsPulses`, `liveImagine`, `showCause`. Keep all off when committing.
+- `room`: the room-scale sample world (see Room scale above).
+- Test-only scene flags on the tests object: `showRoom`, `roomPlay`, `genModels`, `showUniverse`, `showEditor`, `showGrow`, `showShots`, `shotsPulses`, `liveImagine`, `showCause`. Keep all off when committing.
 
 ## Known issues / honest limits
 - Preview only: no Spectacles hardware testing. Voice is device-only (no mic ASR in Preview).
 - Real taps on the editor pills and the Discoveries card are untested (tests call the same functions).
-- The universe layout is cramped on the current stage; the chase is only about 10 cm.
+- Legacy `universe`/`chain` presets are now K-scaled copies about the camera (look identical on screen).
+- Story physics in the room: the cat is pulled equally by lantern and house, so it hovers between them rather than strictly chasing.
 - Cat facing direction was tuned in Preview only; the real model's forward axis on device is unconfirmed.
-- Up to 8 objects. Post-effects (bloom/glow) were not measured; no fps figures.
+- Up to 8 objects. Bloom was skipped by decision; no focused fps figure yet (see fps).
 - Lens Studio can run stale scripts: always run `RecompileTypeScriptTool` before refreshing the Preview.
 
-## Locked direction (next work, not yet implemented)
+## Locked direction (room-as-canvas items done; UI items pending)
 A user-created living world in the user's real room. Creation and simulation are the two primary actions. No new rules, shapes or challenges.
 - **Room as canvas:** remove the stage disc; objects live 0.5-2 m away at different heights, on real surfaces (WorldQuery, Sunlit Room table/floor as fallback) or floating; bounds become a large volume; retune forces, distances, collision sizes and caps for room scale; hero objects 20-40 cm.
 - **Sample world plus live creation:** a `room` preset as the sample world (island house above the table, flower on the floor, floating lantern, cat on the floor), story through the real rule engine (cat-lantern Attract, lantern into flower fires the trigger, flips to Repel, cat flees home). The user can then create and change things live.

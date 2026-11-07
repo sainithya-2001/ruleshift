@@ -35,6 +35,7 @@ On the **RULESHIFT Controller** scene object:
 - `demoPreset` (off by default): when on, the Lens opens on an empty stage with no hints, ready to record. Presets never leave the "Pinch a surface to place it" hint showing.
 - `demoStage` (only read when `demoPreset` is on): set it to `chain` to open with a gem, an orb and a cube spread across the stage. The gem and orb are linked with **Attract** and the orb and cube with **On Collision**. Press Play: the orb is pulled toward the gem, bumps the cube, a pulse runs down the gem-orb link, and that link flips to **Repel**.
 - `demoStage` = `universe`: opens on four saved Snap3D models (`Assets/RULESHIFT Models/`: library house on a floating island (1.5x, heavy), cat (0.7x, light), paper lantern, glowing flower), loaded instantly with no token or wait. The cat and lantern are linked with Attract, the lantern and flower with On Collision, and the cat and house with Attract. The chain is hand-triggered: the lantern starts far from the flower and nothing collides by itself for 20 s while the cat visibly chases the lantern (about 10 cm). Drag the lantern into the flower and the collision's pulse flips cat-lantern to **Repel**, so the cat is pushed back home.
+- `demoStage` = `room`: the room-scale sample world (the Lens now runs at room scale: no stage disc, objects 0.5-2 m away at different heights). A 40 cm floating island house at eye height, a 28 cm cat and a 26 cm glowing flower on the floor, a 24 cm paper lantern floating at table height. Same story as `universe`: cat-lantern Attract, lantern-flower On Collision, cat-home Attract; drag the lantern into the flower and the cat flees. Embers drift off the lantern and Sparkles hover over the flower. Look down about 18 degrees to see the floor items in the Preview's narrow view.
 - `lightFx` (off by default, recording only): uses one halo layer instead of three and a one-sphere pulse trail, to save frames in Preview while recording. Set it before running; it is read at startup.
 
 ## Optional: Snap3D token (Surprise me and voice-to-3D)
@@ -49,7 +50,7 @@ Generation uses the Remote Service Gateway package and a Snap API token. Without
 
 ## Tests
 
-`Assets/Scripts/RuleShiftTests.js` drives the Lens itself (spawning, linking, rules, collisions, pulses, drag, imagine, captions, toolbar fit and more). To run it, turn on `runTests` on the **RULESHIFT Tests** scene object, run Preview, and read the `RULESHIFT TEST` lines in the logs; the last line is a summary (currently `308/308 PASS - ALL PASS`). The suite runs on a fixed simulation clock (0.1 s per frame, set by the harness through the controller's test-only `fixedStep`), so waits count simulated seconds and results do not depend on host load or Preview fps; production behaviour is unchanged when `fixedStep` is 0. `showEditor`, `showGrow` and `showUniverse` set up scenes for screenshots. Turn `runTests` back off afterwards. A few extra flags on the same object (`liveImagine`, `showCause`) are for manual checks, not for shipping.
+`Assets/Scripts/RuleShiftTests.js` drives the Lens itself (spawning, linking, rules, collisions, pulses, drag, imagine, captions, toolbar fit and more). To run it, turn on `runTests` on the **RULESHIFT Tests** scene object, run Preview, and read the `RULESHIFT TEST` lines in the logs; the last line is a summary (currently `321/321 PASS - ALL PASS`; sections 0-24 run at the legacy 46 cm stage scale, section 25 at room scale). The suite runs on a fixed simulation clock (0.1 s per frame, set by the harness through the controller's test-only `fixedStep`), so waits count simulated seconds and results do not depend on host load or Preview fps; production behaviour is unchanged when `fixedStep` is 0. `showEditor`, `showGrow` and `showUniverse` set up scenes for screenshots. Turn `runTests` back off afterwards. A few extra flags on the same object (`liveImagine`, `showCause`) are for manual checks, not for shipping.
 
 ## Known limits
 
@@ -57,6 +58,9 @@ Generation uses the Remote Service Gateway package and a Snap API token. Without
 - **Tested in Preview only.** Nothing has been run on Spectacles hardware, so comfort, hand tracking feel and on-device frame rate are unproven.
 - **Harmless log line without a token:** `Failed to resolve dependency ./snapTokenLocal` appears once at startup when `snapTokenLocal.ts` is absent. The Lens catches it and carries on with an empty token.
 - Preview ran at roughly 8-17 fps on our machine (even with an empty stage), below the 24 fps we would want. Physics uses real elapsed time split into 0.02 s substeps (at most 6 per frame), so motion keeps real-time speed above about 8 fps and slows down only below that.
+- **Room geometry is virtual in Preview.** The Sunlit Room has no table within 2 m (its coffee table is about 3.2 m away, the floor about 1.5 m below the eye), so without WorldQuery hits the Lens uses a virtual 75 cm table plane and a floor at -150 cm. On device, WorldQuery hits replace these.
+- Floor objects sit about 2 m out (about 2.5 m by line of sight); the Preview view is only about 32 x 37 degrees, so the user must look down to see them.
+- The toolbar and panels are still world-fixed (the planned head-follow toolbar and object-anchored panels are the next UI stage), so they overlap content when the view is pitched.
 - Up to 8 objects. The rule system is deliberately small: five rules, no user-programmed physics.
 - Real mouse or hand taps on the editor pills and the Discoveries card are untested; the tests drive the same functions. The universe layout is cramped, so the cat's chase is only about 10 cm.
 - Generated models are fitted to a fixed stage footprint, so their on-stage size reflects the footprint rather than the prompt.
@@ -68,3 +72,10 @@ Generation uses the Remote Service Gateway package and a Snap API token. Without
 - `Assets/Scripts/Snap3DGenerator.ts`, `Snap3DConfig.ts`: Snap3D generation and token lookup.
 - `Assets/Scripts/RuleShiftTests.js`: the test harness.
 - `devpost/`: design brief and submission notes.
+
+## CREDITS
+
+- **Embers VFX** (Lens Studio Asset Library, package `Embers_VFX.lspkg`): embers drifting off the lantern.
+- **Sparkles VFX** (Lens Studio Asset Library, package `Sparkles_VFX.lspkg`): sparkles over the flower.
+- **House, cat, lantern, flower models** (`Assets/RULESHIFT Models/`): generated with Snap3D through the Remote Service Gateway (house and lantern with `refine: true`), then exported as GLB.
+- **Spectacles Interaction Kit, Spectacles UI Kit, Remote Service Gateway, Icons, Motion, Utilities** packages: Snap Inc., via the Lens Studio Asset Library.

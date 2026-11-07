@@ -9,6 +9,8 @@
 // @input Asset.ObjectPrefab catModel
 // @input Asset.ObjectPrefab lanternModel
 // @input Asset.ObjectPrefab flowerModel
+// @input SceneObject embersVfx
+// @input SceneObject sparklesVfx
 // @input Component.Camera camera
 // @input Asset.Material imagineMaterial
 
@@ -30,8 +32,21 @@ var TRANSFER_KEEP = 0.1, TRANSFER_MIN_SPEED = 0.3;   // the slower object receiv
 var GROW_STEP = 1.15, GROW_CAP = 2;
 var NODE_COLORS = [new vec4(1.0, 0.0, 0.35, 1), new vec4(0.0, 0.85, 1.0, 1), new vec4(1.0, 0.9, 0.0, 1)]; // hot pink, electric cyan, vivid yellow
 var MAX_NODES = 8;
-var WORLD_Z = -95;
-var SIZES = { S: 7, M: 10, L: 14 };            // node scale in cm (diameter of the bounding sphere)
+var WORLD_Z = -95;                             // the UI plane (toolbar, rule editor, card, hints) and the depth the legacy presets were laid out at
+// ---------- World scale ----------
+// Every distance, speed and size below is written for the original 46 cm stage (K = 1) and multiplied by K. The Lens runs at ROOM_K, where the world is the
+// user's room: the same equations scaled by K, so motion keeps its timing but covers room distances (hero objects 20-40 cm, links up to ~2 m).
+// K = 1 (the legacy stage scale, with its stage-sized box) is kept only so the original regression suite can still run unchanged: api.test.setWorldScale(1).
+var ROOM_K = 2.4, K = ROOM_K;
+function roomMode() { return K !== 1; }
+// Room geometry (cm, the camera sits at the origin looking down -z). Measured in the Preview's Sunlit Room by camera parallax: eye height is about 1.5 m, so the floor is at y = -150
+// (+-15 cm); the room's real tables are beyond the 2 m range (the coffee table is ~3.2 m away, the credenza ~4.4 m). The "table" fallback is therefore a virtual 75 cm table
+// plane within reach (y = -75); on a device WorldQuery finds the real surfaces first and these are only the fallback. The legacy stage kept its by-eye table height (-19).
+var TABLE_Y_STAGE = -19, TABLE_Y_ROOM = -75, FLOOR_Y = -150;
+function tableY() { return roomMode() ? TABLE_Y_ROOM : TABLE_Y_STAGE; }
+var TABLE_RECT = { x: 70, zNear: -70, zFar: -160 };   // where the table fallback applies; a ray landing outside it continues to the floor
+var ROOM = { x: 110, yMax: 80, zNear: -45, zFar: -260 };   // the world volume in front of the user (x half-width, ceiling, nearest and farthest depth); the floor is FLOOR_Y
+var SIZES = { S: 7, M: 10, L: 14 };            // node scale in cm at K = 1 (diameter of the bounding sphere); spawnNode multiplies by K
 var WEIGHTS = { light: 1.6, heavy: 0.5 };      // multiplies how strongly forces move the node
 var BOUNCES = { low: 0, high: 0.85 };          // restitution on collisions and walls
 
@@ -147,22 +162,27 @@ function toColor(c) {
     if (c.r !== undefined) { return c; }
     return new vec4(c[0], c[1], c[2], 1);
 }
+function spawnPlane() { return roomMode() ? -130 : WORLD_Z; }   // depth where new objects appear (1.3 m in the room: inside arm's reach of the layout, in front of the table)
+function spotBox(radius) {   // the region new objects are offered: the legacy stage box, or the comfortable part of the room in front of the user
+    if (!roomMode()) { return { x0: -BOX_X + radius, x1: BOX_X - radius, y0: BOX_YMIN + radius, y1: BOX_YMAX - radius, step: 0.5, cy: -2 }; }
+    return { x0: -70 + radius, x1: 70 - radius, y0: -30 + radius, y1: 50 - radius, step: 2, cy: 8 };
+}
 function findFreeSpot(radius) {
-    var best = new vec3(0, -2, WORLD_Z);
+    var b = spotBox(radius), z0 = spawnPlane(), cy = b.cy, sk = roomMode() ? K : 1;
+    var best = new vec3(0, cy, z0);
     for (var k = 0; k < (nodes.length < 3 ? 60 : 0); k++) {   // spiral keeps the first few near the centre; later ones are packed on a grid
-        var ang = k * 2.39996, rad = k === 0 ? 0 : 3 + k * 0.45;
-        var p = new vec3(Math.cos(ang) * rad * 1.1, -2 + Math.sin(ang) * rad * 0.7, WORLD_Z);
-        p = new vec3(Math.max(-BOX_X + radius, Math.min(BOX_X - radius, p.x)), Math.max(BOX_YMIN + radius, Math.min(BOX_YMAX - radius, p.y)), WORLD_Z);
-        var free = nodes.every(function (n) { return n.pos.distance(p) >= n.radius + radius + 0.5; });
+        var ang = k * 2.39996, rad = (k === 0 ? 0 : 3 + k * 0.45) * sk;
+        var p = new vec3(Math.cos(ang) * rad * 1.1, cy + Math.sin(ang) * rad * 0.7, z0);
+        p = new vec3(Math.max(b.x0, Math.min(b.x1, p.x)), Math.max(b.y0, Math.min(b.y1, p.y)), z0);
+        var free = nodes.every(function (n) { return n.pos.distance(p) >= n.radius + radius + 0.5 * sk; });
         if (free) { return p; }
         best = p;
     }
-    // spiral found nothing: scan the whole box on a fine grid for any free spot
-    var x0 = -BOX_X + radius, x1 = BOX_X - radius, y0 = BOX_YMIN + radius, y1 = BOX_YMAX - radius;
-    for (var gy = y0; gy <= y1 + 0.001; gy += 0.5) {
-        for (var gx = x0; gx <= x1 + 0.001; gx += 0.5) {
-            var q = new vec3(gx, gy, WORLD_Z);
-            if (nodes.every(function (n) { return n.pos.distance(q) >= n.radius + radius + 0.1; })) { return q; }
+    // spiral found nothing: scan the whole region on a fine grid for any free spot
+    for (var gy = b.y0; gy <= b.y1 + 0.001; gy += b.step) {
+        for (var gx = b.x0; gx <= b.x1 + 0.001; gx += b.step) {
+            var q = new vec3(gx, gy, z0);
+            if (nodes.every(function (n) { return n.pos.distance(q) >= n.radius + radius + 0.1 * sk; })) { return q; }
         }
     }
     return best;
@@ -200,7 +220,7 @@ function spawnNode(opts) {
     opts = opts || {};
     if (nodes.length >= MAX_NODES) { print("RULESHIFT limit reached (" + MAX_NODES + ")"); return null; }
     var shape = opts.shape || "sphere";
-    var size = opts.size || SIZES[opts.sizeKey || "M"];
+    var size = opts.size || SIZES[opts.sizeKey || "M"] * K;
     var col = toColor(opts.color);
     var obj = cloneTemplate(NODE_TMPL, opts.name || (shape + " " + (nodes.length + 1)));
     var rmv = obj.getComponent("Component.RenderMeshVisual");
@@ -218,7 +238,7 @@ function spawnNode(opts) {
     var scale = vec3.one().uniformScale(size);
     tr.setLocalScale(scale);
     var radius = size * 0.5;
-    var p = opts.pos ? new vec3(opts.pos.x, opts.pos.y, opts.pos.z === undefined ? WORLD_Z : opts.pos.z) : findFreeSpot(radius);
+    var p = opts.pos ? new vec3(opts.pos.x, opts.pos.y, opts.pos.z === undefined ? spawnPlane() : opts.pos.z) : findFreeSpot(radius);
     tr.setLocalPosition(p);
     var col2 = obj.getComponent("Component.ColliderComponent");
     if (col2 && col2.shape && col2.shape.radius !== undefined) { var sh = col2.shape; sh.radius = 0.5; col2.shape = sh; }
@@ -254,8 +274,8 @@ function deleteNode(n) {
 
 // ---------- Placement: a pinch on a surface puts the newest object there ----------
 // Surfaces: a virtual table plane (always available), with WorldQuery tried first when it returns hits.
-var TABLE_Y = -19;               // virtual table surface: the stage rests on the Sunlit Room table (placed by eye; WorldQuery returns no hits in Preview)
-var pendingPlace = null;         // the newest spawned object waits for a pinch to be placed
+// (TABLE_Y / FLOOR_Y / TABLE_RECT are declared with the room geometry at the top; WorldQuery returns no hits in Preview, so those are the fallback surfaces.)
+var pendingPlace = null;        // the newest spawned object waits for a pinch to be placed
 var hintObj = null, hintText = null;
 (function () {
     var h = makeText("Place Hint", 80, new vec3(0, 26, WORLD_Z), new vec4(0.75, 1, 0.85, 1));
@@ -279,22 +299,33 @@ function initWorldQuery() {
     } catch (e) { wqSession = null; wqStatus = "unavailable: " + e; }
     print("RULESHIFT WorldQuery " + wqStatus);
 }
-function planeHit(o, d) {   // intersect the ray with the table plane; looking at or above the horizon never hits it
+var lastSurface = null;   // which fallback surface the last ray used ("plane" at K = 1, else "table" or "floor")
+function planeHit(o, d) {   // the table plane (legacy) or, in the room, the table when the ray lands on it and the floor otherwise; looking at or above the horizon never hits
     if (d.y > -0.001) { return null; }
-    var t = (TABLE_Y - o.y) / d.y;
-    return o.add(d.uniformScale(t));
+    var t = (tableY() - o.y) / d.y, p = o.add(d.uniformScale(t));
+    if (!roomMode()) { lastSurface = "plane"; return p; }
+    if (Math.abs(p.x) <= TABLE_RECT.x && p.z <= TABLE_RECT.zNear && p.z >= TABLE_RECT.zFar) { lastSurface = "table"; return p; }
+    var tf = (FLOOR_Y - o.y) / d.y;
+    lastSurface = "floor";
+    return o.add(d.uniformScale(tf));
 }
 function worldDepthHit(o, d) {   // fallback: where the ray crosses the world's depth plane
-    var t = (WORLD_Z - o.z) / (Math.abs(d.z) > 0.001 ? d.z : -0.001);
+    var t = (spawnPlane() - o.z) / (Math.abs(d.z) > 0.001 ? d.z : -0.001);
     return o.add(d.uniformScale(Math.max(t, 1)));
 }
 function placeNodeAt(n, hit, via) {
-    var onTable = via === "plane";
-    var lx = Math.min(BOX_X, STAGE_R - n.radius);
-    var p = new vec3(Math.max(-lx, Math.min(lx, hit.x)),
-        onTable ? TABLE_Y + n.radius : hit.y,
-        Math.max(WORLD_Z - BOX_Z, Math.min(WORLD_Z + BOX_Z, hit.z)));
-    p = new vec3(p.x, Math.max(BOX_YMIN, Math.min(BOX_YMAX, p.y)), p.z);
+    var p;
+    if (roomMode()) {   // an object rests ON the surface it was placed on (centre one radius above it), anywhere inside the room volume
+        var onSurf = via === "plane" || via === "table" || via === "floor" || via === "worldquery";
+        p = clampToBox(n, new vec3(hit.x, onSurf ? hit.y + n.radius : hit.y, hit.z));
+    } else {
+        var onTable = via === "plane";
+        var lx = Math.min(BOX_X, STAGE_R - n.radius);
+        p = new vec3(Math.max(-lx, Math.min(lx, hit.x)),
+            onTable ? tableY() + n.radius : hit.y,
+            Math.max(WORLD_Z - BOX_Z, Math.min(WORLD_Z + BOX_Z, hit.z)));
+        p = new vec3(p.x, Math.max(BOX_YMIN, Math.min(BOX_YMAX, p.y)), p.z);
+    }
     n.pos = p; n.initial = new vec3(p.x, p.y, p.z); n.vel = vec3.zero(); n.force = vec3.zero();
     n.tr.setLocalPosition(p);
     if (pendingPlace === n) { pendingPlace = null; }
@@ -305,7 +336,7 @@ function placeFromRay(o, d) {
     if (!pendingPlace) { return null; }
     var n = pendingPlace;
     var hit = planeHit(o, d);
-    if (hit) { placeNodeAt(n, hit, "plane"); return "plane"; }
+    if (hit) { var via = lastSurface || "plane"; placeNodeAt(n, hit, via); return via; }
     placeNodeAt(n, worldDepthHit(o, d), "world");
     return "world";
 }
@@ -438,7 +469,7 @@ function pressEndNode(n, allowTap) {
     if (nodeIndex(n) < 0) { return; }
     n.dragging = false; var p = n.tr.getLocalPosition(); n.pos = new vec3(p.x, p.y, p.z); n.vel = vec3.zero();
     // only a short press that barely moved counts as a tap-select; drags never do
-    if (allowTap && elapsed - n.tapT < 0.35 && p.distance(n.tapP) < 1.5) { handleTapNode(n); }
+    if (allowTap && elapsed - n.tapT < 0.35 && p.distance(n.tapP) < 1.5 * K) { handleTapNode(n); }
 }
 function clearLinks() {
     clearCause();
@@ -483,11 +514,12 @@ function computeForces() {
         var dist = Math.max(delta.length, 0.01);
         var dir = delta.uniformScale(1 / dist);   // A -> B
         var f = 0;
+        // every length, speed and force is scaled by K, so a room-scale world is an exact K-times copy of the stage dynamics (same timing, K-times the distance)
         if (c.rule === RULES.ATTRACT) {
-            var rest = A.radius + B.radius + LINK_GAP;
-            f = dist > rest ? script.strength * 30 * Math.min(1, (dist - rest) / 10) : 0;
+            var rest = A.radius + B.radius + LINK_GAP * K;
+            f = dist > rest ? script.strength * 30 * K * Math.min(1, (dist - rest) / (10 * K)) : 0;
         } else if (c.rule === RULES.REPEL) {
-            f = dist < REPEL_RANGE ? -script.strength * 60 * (1 - dist / REPEL_RANGE) - 6 : 0;
+            f = dist < REPEL_RANGE * K ? -script.strength * 60 * K * (1 - dist / (REPEL_RANGE * K)) - 6 * K : 0;
         }
         // positive f pulls A toward B and B toward A
         A.force = A.force.add(dir.uniformScale(f));
@@ -499,8 +531,8 @@ var REARM_GAP = 1.5, PULSE_TIME = 0.5, PULSE_AMOUNT = 0.9;
 function flip(rule) { return rule === RULES.ATTRACT ? RULES.REPEL : (rule === RULES.REPEL ? RULES.ATTRACT : rule); }
 function touchEdge(c) {   // edge-triggered: true once when the pair starts touching, re-armed only after they separate by REARM_GAP
     var dd = c.A.pos.distance(c.B.pos), touchD = c.A.radius + c.B.radius;
-    if (c.touching) { if (dd > touchD + REARM_GAP) { c.touching = false; } return false; }
-    if (dd > touchD + 0.1) { return false; }
+    if (c.touching) { if (dd > touchD + REARM_GAP * K) { c.touching = false; } return false; }
+    if (dd > touchD + 0.1 * K) { return false; }
     c.touching = true; c.fires = (c.fires || 0) + 1;
     return true;
 }
@@ -561,7 +593,7 @@ function makeCausePulse() {
         var a = CAUSE_ALPHA[i];
         ps.baseColor = new vec4(1.0 * a, 0.95 * a, 0.75 * a, a);
         v.setRenderOrder(60 - i);
-        o.getTransform().setLocalScale(vec3.one().uniformScale(CAUSE_SIZES[i] / SPHERE_D));
+        o.getTransform().setLocalScale(vec3.one().uniformScale(CAUSE_SIZES[i] * K / SPHERE_D));
         p.parts.push(o.getTransform());
     }
     causePool.push(p);
@@ -628,7 +660,7 @@ function integrate(dt) {
         if (n.dragging) { return; }
         n.vel = n.vel.add(n.force.uniformScale(dt * n.accel)).uniformScale(Math.max(0, 1 - DAMPING * dt));
         var sp = n.vel.length;
-        if (sp > MAX_SPEED) { n.vel = n.vel.uniformScale(MAX_SPEED / sp); }
+        if (sp > MAX_SPEED * K) { n.vel = n.vel.uniformScale(MAX_SPEED * K / sp); }
         var p = n.pos.add(n.vel.uniformScale(dt));
         var q = clampToBox(n, p);
         if (n.rest > 0) {   // bouncy walls: reflect the velocity component that hit the wall
@@ -711,6 +743,10 @@ function updateGoal(dt) {
 var STAGE_R = 23;
 var BOX_X = 17, BOX_YMIN = -16, BOX_YMAX = 8, BOX_Z = 10;   // keeps objects above the buttons and inside the view
 function clampToBox(n, p) {
+    if (roomMode()) {   // the room volume: floor to ceiling, side to side, and from just in front of the user to the far wall (an object may rest on the floor)
+        var r = n.radius;
+        return new vec3(Math.max(-(ROOM.x - r), Math.min(ROOM.x - r, p.x)), Math.max(FLOOR_Y + r, Math.min(ROOM.yMax - r, p.y)), Math.max(ROOM.zFar + r, Math.min(ROOM.zNear - r, p.z)));
+    }
     var lx = Math.min(BOX_X, STAGE_R - n.radius);   // big objects stop at the stage rim
     return new vec3(Math.max(-lx, Math.min(lx, p.x)),
         Math.max(Math.max(BOX_YMIN, -21 + n.radius), Math.min(BOX_YMAX, p.y)),   // big objects also stay above the toolbar (top edge y = -21)
@@ -777,12 +813,16 @@ function updateLabel(c) {
     var mid = A.add(B).uniformScale(0.5);
     var toCam = mid.uniformScale(-1 / Math.max(mid.length, 0.01));   // camera is at the origin
     var cx = 0; nodes.forEach(function (n) { cx += n.pos.x / nodes.length; });   // side links push their labels outward so labels don't pile up
-    var dx = Math.max(-1, Math.min(1, (mid.x - cx) / 6)) * 6.5;
-    var lp = mid.add(toCam.uniformScale(22)).add(new vec3(dx, 7, 0));
-    lp = new vec3(Math.max(-LABEL_MAX_X, Math.min(LABEL_MAX_X, lp.x)), lp.y, lp.z);   // keep wide labels inside the visible stage (a label at the far rim was clipped)
+    var dx = Math.max(-1, Math.min(1, (mid.x - cx) / (6 * K))) * 6.5 * K;
+    var lp = mid.add(toCam.uniformScale(22)).add(new vec3(dx, 7 * K, 0));
+    // in the room a label keeps the same on-screen size at any depth (scaled by depth / the UI plane's depth) and stays inside the visible width at its depth
+    var lscale = roomMode() ? Math.max(1, Math.min(3, -lp.z / -WORLD_Z)) : 1;
+    var lmx = roomMode() ? script.api.view().halfW / -WORLD_Z * Math.max(-lp.z, 1) * 0.8 : LABEL_MAX_X;   // keep wide labels inside the visible stage (a label at the far rim was clipped)
+    lp = new vec3(Math.max(-lmx, Math.min(lmx, lp.x)), lp.y, lp.z);
+    c.labelTr.setWorldScale(vec3.one().uniformScale(lscale));
     // never sit on top of an object: if the label's screen footprint touches any node, nudge it upward until clear
-    var ext = labelExtent(c), nudged = 0;
-    if (ext) { while (nudged < LABEL_NUDGE_MAX && labelHitsNode(lp, ext, c)) { lp = lp.add(new vec3(0, LABEL_NUDGE_STEP, 0)); nudged += LABEL_NUDGE_STEP; } }
+    var ext = labelExtent(c), nudged = 0, nstep = LABEL_NUDGE_STEP * lscale, nmax = LABEL_NUDGE_MAX * K;
+    if (ext) { while (nudged < nmax && labelHitsNode(lp, ext, c)) { lp = lp.add(new vec3(0, nstep, 0)); nudged += nstep; } }
     c.labelNudge = nudged;
     if (ext) { var ddp = Math.max(-lp.z, 1); c.lblRect = { c: c, x: (lp.x + ext.ox) / ddp, y: (lp.y + ext.oy) / ddp, hw: ext.hw / ddp, hh: ext.hh / ddp }; placedLabels.push(c.lblRect); }
     c.labelTr.setWorldPosition(lp);
@@ -807,9 +847,9 @@ function updateVisual(c) {
         if (c.flash >= FLASH_TIME) { c.flash = -1; applyColor(c); }
         else { col = lerp4(RULE_COLOR[c.rule], WHITE4, 1 - c.flash / FLASH_TIME); setBeamColor(c, col); }
     }
-    var w = Math.max(0.45, Math.min(c.A.radius, c.B.radius) * 0.16) * (1 + 1.2 * pk);   // thin beam
+    var w = Math.max(0.45 * K, Math.min(c.A.radius, c.B.radius) * (roomMode() ? 0.07 : 0.16)) * (1 + 1.2 * pk);   // thin beam: ~1 cm in the room (objects are 2.4x bigger on screen, so the same 0.16 radius ratio read as a fat band); never thinner than 0.45 cm at stage scale
     // gentle arc: always bulges to the left of A -> B, so it never flips side while objects move
-    var perp = new vec3(-dir.y, dir.x, 0), h = Math.min(0.12 * dist, 4);
+    var perp = new vec3(-dir.y, dir.x, 0), h = Math.min(0.12 * dist, 4 * K);
     var mid = A.add(B).uniformScale(0.5), C = mid.add(perp.uniformScale(2 * h));
     c.arcC = C;
     var prev = A;
@@ -827,14 +867,14 @@ function updateVisual(c) {
     var mcol = lerp4(col, WHITE4, 0.55);   // motes: bright cores in the rule colour
     for (var m = 0; m < BEAM_MOTES; m++) {
         var u = (fxT * BEAM_FLOW + m / BEAM_MOTES + (c.beamPhase || 0)) % 1, mo = c.motes[m];
-        mo.tr.setWorldPosition(beamPoint(A, C, B, u).add(new vec3(0, 0, 0.3)));
+        mo.tr.setWorldPosition(beamPoint(A, C, B, u).add(new vec3(0, 0, 0.3 * K)));
         var fade = Math.sin(Math.PI * u);
         mo.tr.setLocalScale(vec3.one().uniformScale(w * 2.6 * (0.6 + 0.4 * fade) / SPHERE_D));
         mo.pass.baseColor = new vec4(mcol.r * fade, mcol.g * fade, mcol.b * fade, fade);
     }
     if (c.collider) {   // wide invisible tap target, shorter than the span so objects stay grabbable
         var sh = c.collider.shape;
-        sh.size = new vec3(6, Math.max(dist - c.A.radius - c.B.radius, 1), 6);
+        sh.size = new vec3(6 * K, Math.max(dist - c.A.radius - c.B.radius, 1), 6 * K);
         c.collider.shape = sh;
     }
 }
@@ -877,6 +917,17 @@ function updateModelLife(dt) {
 var AMB_MAX = 10, AMB_LIFE = 1.8, AMB_RATE = 4.5, ambPool = [], ambActive = [], ambAcc = 0, ambSeed = 12345, ambRound = 0;
 function ambRand() { ambSeed = (ambSeed * 1664525 + 1013904223) % 4294967296; return ambSeed / 4294967296; }
 function glowEmitters() { var out = []; nodes.forEach(function (n) { var k = n.modelRoot ? modelKind(n) : null; if (k === "lantern" || k === "flower" || (n.glowOn && !n.modelRoot)) { out.push(n); } }); return out; }
+// Asset Library VFX (see README CREDITS): Embers drift off the lantern, Sparkles hover over the flower; each is only on while its object exists.
+var vfxFollow = null;
+function updateVfx() {
+    var lan = null, flo = null;
+    nodes.forEach(function (n) { var k = n.modelRoot ? modelKind(n) : null; if (k === "lantern") { lan = n; } else if (k === "flower") { flo = n; } });
+    [[script.embersVfx, lan, 0.1], [script.sparklesVfx, flo, 0.4]].forEach(function (e) {
+        var o = e[0], n = e[1]; if (!o) { return; }
+        if (o.enabled !== !!n) { o.enabled = !!n; }
+        if (n) { var t = o.getTransform(); t.setWorldPosition(n.pos.add(new vec3(0, n.radius * e[2], 0.5 * K))); t.setWorldScale(vec3.one().uniformScale(n.radius / 12)); }
+    });
+}
 function updateAmbient(dt) {
     fxT += dt;
     var em = glowEmitters();
@@ -897,7 +948,7 @@ function updateAmbient(dt) {
             }
             var a = ambRand() * Math.PI * 2, rr = n.radius * (0.5 + 0.6 * ambRand());
             sp.age = 0; sp.n = n; sp.size = 0.5 + 0.5 * ambRand();
-            sp.p = new vec3(n.pos.x + Math.cos(a) * rr, n.pos.y + Math.sin(a) * rr * 0.8, n.pos.z + 0.8);
+            sp.p = new vec3(n.pos.x + Math.cos(a) * rr, n.pos.y + Math.sin(a) * rr * 0.8, n.pos.z + 0.8 * K);
             sp.col = n.modelRoot && modelKind(n) === "flower" ? new vec4(1, 0.6, 0.85, 1) : (n.modelRoot ? new vec4(1, 0.85, 0.45, 1) : lerp4(n.color, WHITE4, 0.5));
             sp.o.enabled = true; sp.tr.setWorldPosition(sp.p); ambActive.push(sp);
         }
@@ -906,9 +957,9 @@ function updateAmbient(dt) {
         var s = ambActive[i]; s.age += dt;
         if (s.age >= AMB_LIFE) { s.o.enabled = false; ambActive.splice(i, 1); continue; }
         var u = s.age / AMB_LIFE, al = Math.sin(Math.PI * u) * 0.75;
-        s.p = s.p.add(new vec3(Math.sin(s.age * 2.3 + s.size * 9) * 0.25 * dt, 2.2 * dt, 0));
+        s.p = s.p.add(new vec3(Math.sin(s.age * 2.3 + s.size * 9) * 0.25 * K * dt, 2.2 * K * dt, 0));
         s.tr.setWorldPosition(s.p);
-        s.tr.setLocalScale(vec3.one().uniformScale(s.size * (1 - 0.3 * u) / SPHERE_D));
+        s.tr.setLocalScale(vec3.one().uniformScale(s.size * K * (1 - 0.3 * u) / SPHERE_D));
         s.pass.baseColor = new vec4(s.col.r * al, s.col.g * al, s.col.b * al, al);
     }
 }
@@ -935,11 +986,11 @@ function detectContacts() {
     for (var i = 0; i < nodes.length; i++) {
         for (var j = i + 1; j < nodes.length; j++) {
             var A = nodes[i], B = nodes[j], d = B.pos.sub(A.pos), dist = d.length;
-            if (dist > A.radius + B.radius + 0.1) { continue; }
+            if (dist > A.radius + B.radius + 0.1 * K) { continue; }
             var key = A.id + "_" + B.id; now[key] = true;
             if (contacts[key] || state !== "live" || A.dragging || B.dragging) { continue; }
             var dir = dist > 0.001 ? d.uniformScale(1 / dist) : new vec3(1, 0, 0);
-            if (-B.vel.sub(A.vel).dot(dir) > CONTACT_APPROACH) { discover("contact", A.obj.name + "-" + B.obj.name); }
+            if (-B.vel.sub(A.vel).dot(dir) > CONTACT_APPROACH * K) { discover("contact", A.obj.name + "-" + B.obj.name); }
         }
     }
     contacts = now;
@@ -1179,11 +1230,14 @@ function clearAll() {
     setState("creation");
     print("RULESHIFT cleared all");
 }
+// Legacy presets (demo, chain, universe) are authored at the 46 cm stage: LP maps a stage position to the same spot scaled about the camera by K (and K times deeper),
+// which keeps their on-screen layout identical at room scale. The new "room" preset is authored directly in room coordinates.
+function LP(x, y) { return new vec3(x * K, y * K, WORLD_Z * K); }
 function loadDemo() {   // the starting set used for the video: pink, cyan, yellow spheres; pink-cyan attract, cyan-yellow repel
     clearAll();
-    var a = spawnNode({ shape: "sphere", color: NODE_COLORS[0], size: 10, accel: 1, rest: 0, pos: new vec3(-12, -9, WORLD_Z), name: "Sphere A" });
-    var b = spawnNode({ shape: "sphere", color: NODE_COLORS[1], size: 10, accel: 1, rest: 0, pos: new vec3(12, -9, WORLD_Z), name: "Sphere B" });
-    var c = spawnNode({ shape: "sphere", color: NODE_COLORS[2], size: 10, accel: 1, rest: 0, pos: new vec3(0, 4, WORLD_Z), name: "Sphere C" });
+    var a = spawnNode({ shape: "sphere", color: NODE_COLORS[0], size: 10 * K, accel: 1, rest: 0, pos: LP(-12, -9), name: "Sphere A" });
+    var b = spawnNode({ shape: "sphere", color: NODE_COLORS[1], size: 10 * K, accel: 1, rest: 0, pos: LP(12, -9), name: "Sphere B" });
+    var c = spawnNode({ shape: "sphere", color: NODE_COLORS[2], size: 10 * K, accel: 1, rest: 0, pos: LP(0, 4), name: "Sphere C" });
     var ab = slotFor(a, b, true), bc = slotFor(b, c, true); slotFor(a, c, true);   // slot order AB, BC, AC
     activateLink(ab, RULES.ATTRACT, true); activateLink(bc, RULES.REPEL, true);
     setGoalEnabled(true);
@@ -1195,9 +1249,9 @@ function loadDemo() {   // the starting set used for the video: pink, cyan, yell
 // a pulse runs down the gem-orb link and flips it to REPEL). Press Play to start it.
 function loadChain() {
     clearAll();
-    var gem = spawnNode({ shape: "crystal", color: NODE_COLORS[0], size: 10, glow: true, weight: "heavy", pos: new vec3(13, 4, WORLD_Z), name: "Gem" });
-    var orb = spawnNode({ shape: "sphere", color: NODE_COLORS[1], size: 10, weight: "light", pos: new vec3(-13, 4, WORLD_Z), name: "Orb" });
-    var cube = spawnNode({ shape: "cube", color: NODE_COLORS[2], size: 10, pos: new vec3(-2, -4, WORLD_Z), name: "Cube" });
+    var gem = spawnNode({ shape: "crystal", color: NODE_COLORS[0], size: 10 * K, glow: true, weight: "heavy", pos: LP(13, 4), name: "Gem" });
+    var orb = spawnNode({ shape: "sphere", color: NODE_COLORS[1], size: 10 * K, weight: "light", pos: LP(-13, 4), name: "Orb" });
+    var cube = spawnNode({ shape: "cube", color: NODE_COLORS[2], size: 10 * K, pos: LP(-2, -4), name: "Cube" });
     activateLink(slotFor(gem, orb, true), RULES.ATTRACT, true);
     activateLink(slotFor(orb, cube, true), RULES.COLLISION_TRIGGER, true);
     pendingPlace = null;   // everything is already placed: no placement hint
@@ -1211,11 +1265,11 @@ function loadUniverse() {
     // A hand-triggered chain: the cat chases the lantern across the stage, nothing collides by itself, and dragging the lantern into the flower
     // fires the Collision Trigger, which flips cat-lantern to REPEL so the cat is pushed back home. Home top-left, cat beside it, lantern bottom-right, flower top-right.
     clearAll();
-    var base = 12;
-    var home = spawnModelNode(script.homeModel, "Home", base * 1.5, "heavy", new vec3(-14, 7, WORLD_Z), NODE_COLORS[2]);
-    var cat = spawnModelNode(script.catModel, "Cat", base * 0.7, "light", new vec3(0.2, 7.6, WORLD_Z), NODE_COLORS[0]);
-    var lantern = spawnModelNode(script.lanternModel, "Lantern", base * 0.85, "heavy", new vec3(17, -16, WORLD_Z), NODE_COLORS[1]);
-    var flower = spawnModelNode(script.flowerModel, "Flower", base, null, new vec3(16, 5.5, WORLD_Z), NODE_COLORS[0]);
+    var base = 12 * K;
+    var home = spawnModelNode(script.homeModel, "Home", base * 1.5, "heavy", LP(-14, 7), NODE_COLORS[2]);
+    var cat = spawnModelNode(script.catModel, "Cat", base * 0.7, "light", LP(0.2, 7.6), NODE_COLORS[0]);
+    var lantern = spawnModelNode(script.lanternModel, "Lantern", base * 0.85, "heavy", LP(17, -16), NODE_COLORS[1]);
+    var flower = spawnModelNode(script.flowerModel, "Flower", base, null, LP(16, 5.5), NODE_COLORS[0]);
     if (home && cat && lantern && flower) {
         activateLink(slotFor(lantern, flower, true), RULES.COLLISION_TRIGGER, true);   // first, so its label gets the spot nearest its link
         activateLink(slotFor(cat, lantern, true), RULES.ATTRACT, true);
@@ -1225,8 +1279,35 @@ function loadUniverse() {
     print("RULESHIFT demo stage: universe");
 }
 script.api.loadUniverse = loadUniverse;
+// demoStage "room": the sample world, authored directly in room coordinates (cm, camera at the origin looking down -z; table top y = TABLE_Y, floor y = FLOOR_Y).
+// The island house floats above the real table, the lantern floats elsewhere, the flower and the cat rest on the floor (cat between them and the house).
+// The story runs through the real rule engine: cat-lantern ATTRACT, lantern-flower COLLISION TRIGGER, cat-home ATTRACT. Press Play and the cat is drawn toward the lantern;
+// drag the lantern into the flower and the collision's pulse flips cat-lantern to REPEL, so the cat flees and the house pulls it home. Nothing collides by itself.
+var ROOM_LAYOUT = {   // hero sizes 20-40 cm; centres in cm; floor objects rest on FLOOR_Y. Compact in angle (the Preview's view is only ~32 x 37 degrees): look down ~18 degrees to see it all.
+    home: { size: 40, x: -26, y: -18, z: -165 },       // floats 57 cm above the virtual table plane (y = -75), at about the height of the user's eyes
+    cat: { size: 28, x: -12, y: null, z: -205 },       // on the floor
+    lantern: { size: 24, x: 28, y: -70, z: -150 },     // floating elsewhere, at table height
+    flower: { size: 26, x: 30, y: null, z: -205 }      // on the floor
+};
+function loadRoom() {
+    clearAll();
+    var L = ROOM_LAYOUT;
+    function at(o) { return new vec3(o.x, o.y === null ? FLOOR_Y + o.size / 2 : o.y, o.z); }
+    var home = spawnModelNode(script.homeModel, "Home", L.home.size, "heavy", at(L.home), NODE_COLORS[2]);
+    var cat = spawnModelNode(script.catModel, "Cat", L.cat.size, "light", at(L.cat), NODE_COLORS[0]);
+    var lantern = spawnModelNode(script.lanternModel, "Lantern", L.lantern.size, "heavy", at(L.lantern), NODE_COLORS[1]);
+    var flower = spawnModelNode(script.flowerModel, "Flower", L.flower.size, null, at(L.flower), NODE_COLORS[0]);
+    if (home && cat && lantern && flower) {
+        activateLink(slotFor(lantern, flower, true), RULES.COLLISION_TRIGGER, true);
+        activateLink(slotFor(cat, lantern, true), RULES.ATTRACT, true);
+        activateLink(slotFor(cat, home, true), RULES.ATTRACT, true);
+    }
+    pendingPlace = null;
+    print("RULESHIFT demo stage: room");
+}
+script.api.loadRoom = loadRoom;
 function applyDemoSetup() {
-    if (script.demoStage === "chain") { loadChain(); } else if (script.demoStage === "universe") { loadUniverse(); } else { clearAll(); pendingPlace = null; }
+    if (script.demoStage === "chain") { loadChain(); } else if (script.demoStage === "universe") { loadUniverse(); } else if (script.demoStage === "room") { loadRoom(); } else { clearAll(); pendingPlace = null; }
 }
 script.api.loadChain = loadChain;
 script.api.applyDemoSetup = applyDemoSetup;
@@ -1247,7 +1328,10 @@ script.api.pendingPlacement = function () { return pendingPlace ? nodeIndex(pend
 script.api.placeFromRay = placeFromRay;
 script.api.placeAtScreen = placeAtScreen;
 script.api.wqStatus = function () { return wqStatus; };
-script.api.tableY = TABLE_Y;
+Object.defineProperty(script.api, "tableY", { get: function () { return tableY(); } });
+script.api.floorY = FLOOR_Y;
+script.api.room = { floorY: FLOOR_Y, tableY: TABLE_Y_ROOM, tableRect: TABLE_RECT, volume: ROOM, layout: ROOM_LAYOUT };
+script.api.worldScale = function () { return K; };
 script.api.count = function () { return nodes.length; };
 script.api.maxNodes = MAX_NODES;
 script.api.deleteSelected = function () { return selNode ? deleteNode(selNode) : false; };
@@ -1284,6 +1368,10 @@ script.api.test = {
     pillRect: function () { return pillRect; },
     setTestPill: function (r) { testPill = r; },
     setFixedStep: function (s) { fixedStep = s; }, fixedStep: function () { return fixedStep; },   // read/write hooks for RuleShiftTests.js
+    // the legacy regression suite runs at the original stage scale (K = 1); the room suite at ROOM_K. Switch only while no objects exist (clearAll first).
+    setWorldScale: function (k) { K = k; causePool.forEach(function (p) { p.parts.forEach(function (t, i) { t.setLocalScale(vec3.one().uniformScale(CAUSE_SIZES[i] * K / SPHERE_D)); }); }); },
+    ROOM_K: ROOM_K,
+    planeHit: function (o, d) { var h = planeHit(o, d); return h ? { p: h, surface: lastSurface } : null; },
     nodes: nodes, connections: connections, slots: slots,
     tap: function (i) { handleTapNode(nodes[i]); },
     pressStart: function (i) { pressStartNode(nodes[i]); },
@@ -1323,7 +1411,7 @@ script.api.test = {
         setTime: function (t) { CAUSE_TIME = t; }
     },
     deleteNode: function (i) { return deleteNode(nodes[i]); },
-    box: { x: BOX_X, yMin: BOX_YMIN, yMax: BOX_YMAX, zr: BOX_Z, buttonTop: -21 },
+    get box() { return roomMode() ? { x: ROOM.x, yMin: FLOOR_Y, yMax: ROOM.yMax, zr: 0, buttonTop: -1e9, zNear: ROOM.zNear, zFar: ROOM.zFar } : { x: BOX_X, yMin: BOX_YMIN, yMax: BOX_YMAX, zr: BOX_Z, buttonTop: -21 }; },
     goalStage: function () { return goalStage; },
     frames: function () { return frameCount; },
     labelsAll: function (v) { if (v !== undefined) { labelsAll = !!v; } return labelsAll; },
@@ -1396,7 +1484,7 @@ script.createEvent("UpdateEvent").bind(function (e) {
     if (state === "live") { checkCollisions(); }
     updatePulses(dt);
     updateCause(realDt);
-    updateRewrite(realDt); updateSparkles(realDt); updateAmbient(realDt); updateModelLife(realDt);
+    updateRewrite(realDt); updateSparkles(realDt); updateAmbient(realDt); updateVfx(); updateModelLife(realDt);
     updateImagine(dt);
     updateSelection();
     hintObj.enabled = !!pendingPlace && !goalEnabled;
@@ -1420,33 +1508,7 @@ script.createEvent("OnStartEvent").bind(function () {
     wqDelay.reset(2);
 });
 
-// ---------- Stage: a thin glowing disc under the world = placement surface and world bounds ----------
-(function () {
-    var SEG = 64;
-    function ring(r0, r1) {
-        var T = [], i;
-        for (i = 0; i < SEG; i++) {
-            var a0 = i / SEG * Math.PI * 2, a1 = (i + 1) / SEG * Math.PI * 2;
-            var o0 = [Math.cos(a0) * r1, 0, Math.sin(a0) * r1], o1 = [Math.cos(a1) * r1, 0, Math.sin(a1) * r1];
-            var i0 = [Math.cos(a0) * r0, 0, Math.sin(a0) * r0], i1 = [Math.cos(a1) * r0, 0, Math.sin(a1) * r0];
-            if (r0 <= 0) { tri(T, [0, 0, 0], o1, o0, [0, -1, 0]); } else { tri(T, i0, o1, o0, [0, -1, 0]); tri(T, i0, i1, o1, [0, -1, 0]); }
-        }
-        return buildMesh(T);
-    }
-    var layers = [   // [inner, outer, brightness]: stacked additive layers give a soft falloff towards a brighter rim
-        [0, 1.0, 0.11], [0, 0.82, 0.10], [0, 0.6, 0.10], [0, 0.35, 0.08], [0.66, 0.675, 0.22], [0.33, 0.345, 0.22], [0.955, 1.0, 0.6], [0.9, 1.0, 0.2]
-    ];
-    layers.forEach(function (L, li) {
-        var o = global.scene.createSceneObject("Stage " + li);
-        var v = o.createComponent("Component.RenderMeshVisual");
-        v.mesh = ring(L[0], 1); v.mainMaterial = SPHERE_MAT.clone();
-        var p = v.mainPass; p.blendMode = BlendMode.Add; p.depthWrite = false;
-        p.baseColor = new vec4(0.35 * L[2], 0.7 * L[2], 1.0 * L[2], L[2]);
-        v.setRenderOrder(-40 + li);   // far behind the toolbar plates (-8..-5) so the rim never draws over the buttons
-        o.getTransform().setWorldPosition(new vec3(0, TABLE_Y, WORLD_Z));
-        o.getTransform().setLocalScale(vec3.one().uniformScale(STAGE_R));
-    });
-})();
+// ---------- No stage: the world is the user's room (see ROOM / FLOOR_Y / TABLE_Y above). The glowing placement disc was removed; objects rest on real surfaces or float. ----------
 script.api.view = function () {   // visible half-extents (cm) at the world's depth, for placing UI at the edges
     var c = script.camera, hh = Math.tan(c.fov / 2) * Math.abs(WORLD_Z);
     return { halfW: hh * c.aspect, halfH: hh, stageR: STAGE_R };
@@ -1489,7 +1551,7 @@ script.api.parseVoice = parseVoice;
 // imagine(prompt) spawns a normal node (a pulsing placeholder orb with an "Imagining '<prompt>'..." caption). The injected
 // generator (setGenerator) later delivers a glTF asset; the orb's visuals are then swapped for the model while the node
 // keeps all behaviour (drag, link, rules, physics). On failure, or after the timeout, the orb simply stays.
-var IMAGINE_SIZE = 18;                                   // node footprint in cm: 1.5x the old 12 (radius 9 still fits the stage box; collisions use the same radius)
+function imagineSize() { return roomMode() ? 16 * K : 18; }   // node footprint in cm: 18 at the legacy stage; 16 x K = 38 cm in the room (inside the 20-40 cm hero range)
 var GROW_START = 0.65, GROW_TAU = 20;                    // the pending orb starts at 65% and slowly grows towards full size (time constant in s)
 var IMAGINE_COLOR = new vec4(0.7, 0.55, 1.0, 1);
 var IMAGINE_TIMEOUT = 120;                               // seconds
@@ -1587,11 +1649,18 @@ function swapInModel(job, gltf) {
     print("RULESHIFT imagine OK '" + job.prompt + "' in " + (elapsed - job.t0).toFixed(1) + "s (fit scale " + f.toFixed(4) + ", radius " + b2.radius.toFixed(2) + ")");
 }
 // Captions sit above the topmost object on the stage (never at the node), stacked when several show at once.
+// In the room a caption hangs just above its own object (objects are at different depths), at the object's depth and scaled so it keeps a constant on-screen size.
 var CAP_MARGIN = 4, CAP_STEP = 4.5, CAP_MAX_Y = 22;
 function captionY(slot) {
     var top = BOX_YMAX;
     nodes.forEach(function (n) { top = Math.max(top, n.pos.y + n.radius); });
     return Math.min(top + CAP_MARGIN, CAP_MAX_Y - 0) + (slot || 0) * CAP_STEP;
+}
+function placeCaption(job, slot) {
+    if (!roomMode()) { job.cap.tr.setWorldPosition(new vec3(0, captionY(slot), WORLD_Z)); return; }
+    var n = job.n, s = Math.max(1, -n.pos.z / -WORLD_Z);
+    job.cap.tr.setWorldScale(vec3.one().uniformScale(s));
+    job.cap.tr.setWorldPosition(new vec3(n.pos.x, n.pos.y + n.radius + (CAP_MARGIN + slot * CAP_STEP) * s, n.pos.z + n.radius + 1));   // slightly in front of the object so the text is never inside it
 }
 function capSlot(job) { var k = 0; for (var i = 0; i < imagineJobs.length; i++) { if (imagineJobs[i] === job) { return k; } if (imagineJobs[i].cap) { k++; } } return k; }
 function styleCaption(t) {   // readable on any background: dark outline
@@ -1599,11 +1668,12 @@ function styleCaption(t) {   // readable on any background: dark outline
 }
 function imagine(prompt) {
     prompt = cleanPrompt(prompt) || String(prompt || "").trim();
-    var n = spawnNode({ shape: "sphere", color: IMAGINE_COLOR, glow: true, size: IMAGINE_SIZE, name: "Imagined: " + prompt });
+    var n = spawnNode({ shape: "sphere", color: IMAGINE_COLOR, glow: true, size: imagineSize(), name: "Imagined: " + prompt });
     if (!n) { return -1; }
     if (pendingPlace === n) { pendingPlace = null; }   // it appears at a free spot: nothing waits for a pinch, so no placement hint
     var cap = makeText("Imagine Caption", 60, new vec3(0, captionY(0), WORLD_Z), new vec4(0.85, 0.95, 1, 1));
     styleCaption(cap.text);
+    cap.job = null;
     cap.text.text = "Imagining '" + prompt + "'… 0s"; cap.text.renderOrder = 100;
     var job = { n: n, prompt: prompt, t0: elapsed, state: "pending", result: null, cap: cap, capUntil: 0, cancel: null, reason: "", timeout: imagineTimeout };
     imagineJobs.push(job);
@@ -1647,7 +1717,7 @@ function updateImagine(dt) {
             if (job.cap && secs !== job.lastSecs) { job.lastSecs = secs; job.cap.text.text = "Imagining '" + job.prompt + "'… " + secs + "s"; }
         }
         if (job.cap) {
-            job.cap.tr.setWorldPosition(new vec3(0, captionY(capSlot(job)), WORLD_Z));
+            placeCaption(job, capSlot(job));
             if (job.state === "failed" && elapsed >= job.capUntil) { finishCaption(job, null); }
         }
         if (job.state !== "pending" && !job.cap) { imagineJobs.splice(i, 1); }
@@ -1666,6 +1736,7 @@ script.api.captionY = captionY;
 script.api.captionCount = function () { return imagineJobs.filter(function (j) { return !!j.cap; }).length; };
 script.api.cleanPrompt = cleanPrompt;
 script.api.setGenerator = function (fn) { imagineGen = fn; };
+script.api.generate = function (prompt, opts, cb) { return imagineGen ? imagineGen(prompt, cb, opts) : null; };   // raw generator access (model-regeneration harness): opts {refine}, cb {onSuccess(asset, url), onFail(reason)}
 script.api.imagine = imagine;
 script.api.imagineTimeout = function (sec) { if (sec !== undefined) { imagineTimeout = sec; } return imagineTimeout; };
 script.api.imagineJobs = imagineJobs;

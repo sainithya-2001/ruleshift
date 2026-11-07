@@ -1,8 +1,11 @@
 // @input Component.ScriptComponent controller
 // @input bool runTests = false
 // @input bool liveImagine = false
+// @input bool genModels = false
 // @input bool showCause = false
 // @input bool showUniverse = false
+// @input bool showRoom = false
+// @input bool roomPlay = false
 // @input bool showEditor = false
 // @input bool showGrow = false
 // @input bool showShots = false
@@ -34,6 +37,7 @@ if (script.runTests) {
     function* run() {
         yield 0.3;
         var startCount = api.count();
+        T.setWorldScale(1);   // the original checks are written for the legacy stage scale; section 25 covers the room scale
         api.loadDemo(); yield 0.5;   // the demo preset is the starting set the original checks were written for
         check("0 Default scene starts empty (demo preset off)", startCount === 0, "count " + startCount);
         var z = nodes[0].initial.z;
@@ -931,8 +935,38 @@ if (script.runTests) {
         check("24 with no glowing objects the sparkles fade out", amb2 === 0, "left " + amb2);
         T.labelsAll(true);
 
+        // 25. Room scale: the shipped world (K = ROOM_K), the room preset, the story through the real rule engine, and the legacy presets as scaled copies.
+        T.setWorldScale(T.ROOM_K); api.reset(); api.clearAll(); api.loadRoom(); yield 0.5;
+        var rb = T.box, rm = api.room, rn = nodes.slice(), rnames = rn.map(function (n) { return n.obj.name; });
+        check("25 room preset has the four heroes (home, cat, lantern, flower)", rn.length === 4 && ["Home", "Cat", "Lantern", "Flower"].every(function (s) { return rnames.indexOf(s) >= 0; }), rnames.join());
+        check("25 hero objects are 20-40 cm", rn.every(function (n) { return 2 * n.radius >= 19.9 && 2 * n.radius <= 40.1; }), rn.map(function (n) { return (2 * n.radius).toFixed(0); }).join());
+        check("25 objects sit 0.5-2.1 m in front of the user (floor items are ~2 m out, ~2.5 m by line of sight)", rn.every(function (n) { return -n.pos.z >= 50 && -n.pos.z <= 210; }), rn.map(function (n) { return (-n.pos.z).toFixed(0); }).join());
+        check("25 all objects are inside the room volume", rn.every(function (n) { return Math.abs(n.pos.x) <= rb.x + 0.01 && n.pos.y >= rb.yMin - 0.01 && n.pos.y <= rb.yMax + 0.01 && n.pos.z <= rb.zNear + 0.01 && n.pos.z >= rb.zFar - 0.01; }));
+        var rFloor = rn.filter(function (n) { return n.obj.name === "Cat" || n.obj.name === "Flower"; });
+        check("25 the cat and the flower rest on the floor", rFloor.length === 2 && rFloor.every(function (n) { return Math.abs(n.pos.y - n.radius - api.floorY) < 0.6; }), rFloor.map(function (n) { return (n.pos.y - n.radius).toFixed(1); }).join());
+        var ys = rn.map(function (n) { return n.pos.y; }).sort(function (a, b) { return a - b; }), hs = 1;
+        for (var yi = 1; yi < ys.length; yi++) { if (ys[yi] - ys[yi - 1] > 10) { hs++; } }
+        check("25 objects live at different heights (floor, table height, above)", hs >= 3, "bands " + hs);
+        check("25 the island house floats above the virtual table plane and the lantern floats elsewhere", rn[0].pos.y - rn[0].radius > api.tableY && rn[2].pos.y - rn[2].radius > api.floorY + 20, "tableY " + api.tableY);
+        check("25 links: lantern-flower trigger, cat-lantern and cat-home attract", T.connections.length === 3 && conns[0].rule === "COLLISION_TRIGGER" && conns[1].rule === "ATTRACT" && conns[2].rule === "ATTRACT", T.connections.map(function (c) { return c.rule; }).join());
+        var hT = T.planeHit(new vec3(0, 0, 0), new vec3(0, -75, -100).normalize()), hF = T.planeHit(new vec3(0, 0, 0), new vec3(0, -150, -100).normalize()), hU = T.planeHit(new vec3(0, 0, 0), new vec3(0, 20, -100).normalize());
+        check("25 surface fallbacks: a ray lands on the virtual table, else the floor, never above the horizon", hT && hT.surface === "table" && Math.abs(hT.p.y - api.tableY) < 0.5 && hF && hF.surface === "floor" && Math.abs(hF.p.y - api.floorY) < 0.5 && hU === null, (hT && hT.surface) + "/" + (hF && hF.surface) + "/" + hU);
+        api.activate();
+        var catStart = rn[1].pos.distance(rn[2].pos), nearest = catStart;
+        for (var f28 = 0; f28 < 80; f28++) { yield 0.1; nearest = Math.min(nearest, rn[1].pos.distance(rn[2].pos)); }
+        check("25 story: the cat is drawn toward the lantern", nearest < catStart - 5, "start " + catStart.toFixed(0) + " nearest " + nearest.toFixed(0));
+        T.place(2, rn[3].pos.add(new vec3(0, rn[2].radius + rn[3].radius - 0.5, 0)));
+        var flipped = false; for (var f29 = 0; f29 < 60 && !flipped; f29++) { yield 0.1; flipped = conns[1].rule === "REPEL"; }
+        check("25 story: dragging the lantern into the flower flips cat-lantern to REPEL (after the pulse)", flipped, "rule " + conns[1].rule);
+        var d0 = rn[1].pos.distance(rn[2].pos); yield 3;
+        var d1 = rn[1].pos.distance(rn[2].pos);
+        check("25 story: the cat flees from the lantern", d1 > d0 + 5, d0.toFixed(0) + " -> " + d1.toFixed(0));
+        check("25 room physics stays inside the volume and never overlaps", violations.bounds === 0 && violations.overlap === 0, "bounds " + violations.bounds + " overlap " + violations.overlap);
+        api.reset(); yield 0.3;
+        T.setWorldScale(1); api.clearAll();
+
         api.reset();
-        var pass = results.filter(function (r) { return r; }).length;
+        var pass =results.filter(function (r) { return r; }).length;
         print("RULESHIFT TEST SUMMARY: " + pass + "/" + results.length + " PASS" + (pass === results.length ? " - ALL PASS" : " - FAILURES"));
     }
     script.createEvent("OnStartEvent").bind(function () {
@@ -948,6 +982,32 @@ if (script.runTests) {
         if (wait > 0) { return; }
         var r = gen.next();
         if (r.done) { gen = null; } else { wait = r.value; }
+    });
+}
+
+// Model regeneration harness (needs a local token): refine:true generations for the four hero models, printing each download URL.
+// Reads: RULESHIFT GEN <name> try <k> OK secs=... url=<glb url>   (or FAIL ... reason)
+if (script.genModels) {   // input declared in the header block
+    script.createEvent("OnStartEvent").bind(function () {
+        var api = script.controller.api, el = 0, st = 0, pending = 0, round = 0;
+        var PROMPTS = { house: "a cozy library house on a floating island", cat: "a cute cat", lantern: "a glowing paper lantern", flower: "a glowing flower" };
+        script.createEvent("UpdateEvent").bind(function (e) {
+            el += e.getDeltaTime();
+            if (st === 0 && el > 3) {
+                st = 1;
+                (function startRound() {
+                    round++; if (round > 2) { st = 2; return; }
+                    Object.keys(PROMPTS).forEach(function (name) {
+                        pending++;
+                        var t0 = getTime();
+                        api.generate(PROMPTS[name], { refine: true }, {
+                            onSuccess: function (g, url) { print("RULESHIFT GEN " + name + " try " + round + " OK secs=" + (getTime() - t0).toFixed(0) + " url=" + url); if (--pending === 0) { startRound(); } },
+                            onFail: function (why) { print("RULESHIFT GEN " + name + " try " + round + " FAIL " + why); if (--pending === 0) { startRound(); } }
+                        });
+                    });
+                })();
+            }
+        });
     });
 }
 
@@ -1014,6 +1074,27 @@ if (script.showUniverse) {
             if (st === 0 && el > 1) { script.controller.demoStage = "universe"; api.applyDemoSetup(); st = 1; print("RULESHIFT SHOW opening"); }
             else if (st === 1 && el > 11) { api.activate(); st = 2; T.toggleCard(); print("RULESHIFT SHOW play (Discoveries card open)"); }
             else if (st === 2 && T.connections.some(function (c) { return c.rule === "REPEL"; }) && el > 11.8) { st = 3; print("RULESHIFT SHOW chain-flipped"); }
+        });
+    });
+}
+
+// Visual check (not a test): load the room preset, wait for a screenshot, press Play, print a marker mid-chase, then drag the lantern into the flower and print a marker once the chain has flipped.
+if (script.showRoom) {
+    script.createEvent("OnStartEvent").bind(function () {
+        var api = script.controller.api, T = api.test, st = 0, el = 0, fN = 0, fT = 0;
+        script.createEvent("UpdateEvent").bind(function (e) {
+            var d = e.getDeltaTime(); el += d; fN++; fT += d;
+            if (fT >= 5) { print("RULESHIFT ROOM fps " + (fN / fT).toFixed(1)); fN = 0; fT = 0; }
+            if (st === 0 && el > 1) {
+                script.controller.demoStage = "room"; api.applyDemoSetup(); st = 1; print("RULESHIFT SHOW room-opening");
+                var v = api.view(); print("RULESHIFT ROOM view halfW=" + v.halfW.toFixed(1) + " halfH=" + v.halfH.toFixed(1) + " at 95 cm (tan x " + (v.halfW / 95).toFixed(3) + ", tan y " + (v.halfH / 95).toFixed(3) + ")");
+                T.nodes.forEach(function (n) { var dp = -n.pos.z; print("RULESHIFT ROOM node " + n.obj.name + " pos " + n.pos.x.toFixed(0) + "," + n.pos.y.toFixed(0) + "," + n.pos.z.toFixed(0) + " r=" + n.radius.toFixed(0) + " ang " + (n.pos.x / dp).toFixed(3) + "," + (n.pos.y / dp).toFixed(3) + " angR " + (n.radius / dp).toFixed(3)); });
+            }
+            else if (st === 1 && el > 6) { st = 2; print("RULESHIFT SHOW room-before"); }
+            else if (script.roomPlay && st === 2 && el > 9) { api.activate(); st = 3; print("RULESHIFT SHOW room-play"); }
+            else if (st === 3 && el > 12) { st = 4; print("RULESHIFT SHOW room-chase"); }
+            else if (st === 4 && el > 16) { var n = T.nodes; T.place(2, n[3].pos.add(new vec3(0, n[2].radius + n[3].radius - 0.5, 0))); st = 5; print("RULESHIFT SHOW room-collide"); }
+            else if (st === 5 && T.connections.some(function (c) { return c.rule === "REPEL"; })) { st = 6; print("RULESHIFT SHOW room-flipped"); }
         });
     });
 }

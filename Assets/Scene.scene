@@ -17,6 +17,8 @@
     - !<own> c96a945f-56f6-4ef0-ab0e-f6f942238392
     - !<own> 44722fc5-ffda-439e-b442-f872d71305d3
     - !<own> 289f97a7-765f-485e-b48f-d19f29a48ce6
+    - !<own> 2c0c9504-c227-49ef-8d52-e1fc390297ce
+    - !<own> ff2d4982-fc2c-4265-a84d-7c57eca6bb72
   layers: !<Layers/267ee9a7-aff2-4f9d-9a49-f71214747d03>
     userLayers:
       - id: 1
@@ -885,6 +887,22 @@
   ScriptTypes:
     "":
       {}
+- !<SceneObject/2c0c9504-c227-49ef-8d52-e1fc390297ce>
+  PrefabRemaps:
+    - 2c0c9504-c227-49ef-8d52-e1fc390297ce: 1b75f71f-52e4-410f-5055-a3bc5bf87de4
+    - 8f6c3b75-4da2-45b0-b9e4-9372dc3eff95: ec1f589f-6a2e-4f2b-53f6-d3e9a6f1d4a4
+  Name: EmbersVFX
+  Enabled: true
+  Layers: 1
+  LocalTransform: !<TransformEntity>
+    Position: {x: -1.242149, y: -3.188400, z: -24.304550}
+    Rotation: {x: 0.000000, y: 0.000000, z: 0.000000}
+    Scale: {x: 1.000000, y: 1.000000, z: 1.000000}
+    HasSegmentScaleCompensation: false
+  Children:
+    []
+  Components:
+    - !<own> 8f6c3b75-4da2-45b0-b9e4-9372dc3eff95
 - !<SceneObject/2dae2a27-8ce6-466a-8bff-622195c1b3a8>
   PrefabRemaps:
     []
@@ -1147,6 +1165,8 @@
       catModel: !<reference.ObjectPrefab> 90c8f0b0-7e06-455a-935c-31a07477a3fe
       lanternModel: !<reference.ObjectPrefab> d0bac76c-6508-4463-972d-3db45babe381
       flowerModel: !<reference.ObjectPrefab> d25b3ddb-3a41-4243-88cf-0133b20e97d6
+      embersVfx: !<reference.SceneObject> 2c0c9504-c227-49ef-8d52-e1fc390297ce
+      sparklesVfx: !<reference.SceneObject> ff2d4982-fc2c-4265-a84d-7c57eca6bb72
       camera: !<reference.Camera> 00000000-0000-0065-0000-000000000065
       imagineMaterial: !<reference.Material> 8eebcd57-3582-41fe-9642-3f25700777e8
   ScriptTypes:
@@ -1969,6 +1989,25 @@
     - !<own> b859e31c-4c76-46bd-bd6a-042228e52728
   Components:
     []
+- !<VFXComponent/8f6c3b75-4da2-45b0-b9e4-9372dc3eff95>
+  PrefabRemaps:
+    []
+  Name: VFX Component
+  Enabled: true
+  RenderOrder: 0
+  StretchMode: Stretch
+  VerticalAlignment: Center
+  HorizontalAlignment: Center
+  MeshShadowMode: None
+  ShadowColor: {x: 1.000000, y: 1.000000, z: 1.000000, w: 1.000000}
+  ShadowDensity: 1.000000
+  VFXAsset: !<reference> f60f53eb-e2d8-460f-99d2-00c262f250c5
+  SystemRenderLayerInfoMap:
+    0: !<VFXSystemRenderLayerInfo>
+      RenderLayerInfoMap:
+        render_0_0: !<VFXRenderLayerInfo>
+          Enabled: false
+          RenderLayers: 1
 - !<SceneObject/8fe2a532-9bf3-4cde-b598-04ce5470718d>
   PrefabRemaps:
     []
@@ -2666,8 +2705,15 @@
   ScriptInputsDefault:
     runTests: true
     liveImagine: true
+    genModels: true
     showCause: true
     showUniverse: true
+    showRoom: true
+    roomPlay: true
+    showEditor: true
+    showGrow: true
+    showShots: true
+    shotsPulses: true
   ScriptTypesDefault:
     {}
   ScriptInputs:
@@ -2675,8 +2721,15 @@
       controller: !<reference.ScriptComponent> 4aef1a10-019c-4696-a7b1-b4bd90edb0eb
       runTests: false
       liveImagine: false
+      genModels: false
       showCause: false
       showUniverse: false
+      showRoom: false
+      roomPlay: false
+      showEditor: false
+      showGrow: false
+      showShots: false
+      shotsPulses: false
       liveImaginePrompt: a floating paper lantern
   ScriptTypes:
     "":
@@ -3227,6 +3280,25 @@
     - !<own> a7526b33-fca3-4f28-8e32-b0e9aa13c4b4
   Components:
     []
+- !<VFXComponent/fad35096-188c-42e8-b068-cfef50d347b8>
+  PrefabRemaps:
+    []
+  Name: VFX Component
+  Enabled: true
+  RenderOrder: 0
+  StretchMode: Stretch
+  VerticalAlignment: Center
+  HorizontalAlignment: Center
+  MeshShadowMode: None
+  ShadowColor: {x: 1.000000, y: 1.000000, z: 1.000000, w: 1.000000}
+  ShadowDensity: 1.000000
+  VFXAsset: !<reference> fe14cf41-99ff-4c05-a940-f4954fa17302
+  SystemRenderLayerInfoMap:
+    0: !<VFXSystemRenderLayerInfo>
+      RenderLayerInfoMap:
+        render_0_0: !<VFXRenderLayerInfo>
+          Enabled: false
+          RenderLayers: 1
 - !<SceneObject/fb0ad3b7-425f-4844-8c4a-92586ca85d8d>
   PrefabRemaps:
     []
@@ -3287,3 +3359,19 @@
     - !<own> bb75b5ea-8baf-4d8d-bcf8-49bd79873881
   Components:
     []
+- !<SceneObject/ff2d4982-fc2c-4265-a84d-7c57eca6bb72>
+  PrefabRemaps:
+    - fad35096-188c-42e8-b068-cfef50d347b8: a395903f-127e-487c-4398-bcff319d5a65
+    - ff2d4982-fc2c-4265-a84d-7c57eca6bb72: 979a8cc9-9db1-44be-4a39-4215b8e381ab
+  Name: SparklesVFX
+  Enabled: true
+  Layers: 1
+  LocalTransform: !<TransformEntity>
+    Position: {x: 0.000000, y: 0.000000, z: -40.000000}
+    Rotation: {x: 0.000000, y: 0.000000, z: 0.000000}
+    Scale: {x: 1.000000, y: 1.000000, z: 1.000000}
+    HasSegmentScaleCompensation: false
+  Children:
+    []
+  Components:
+    - !<own> fad35096-188c-42e8-b068-cfef50d347b8
