@@ -29,7 +29,9 @@ const ASR_SILENCE_AFTER_SPEECH = 2 // seconds of silence after the last partial 
 const DARK = new vec4(0.12, 0.14, 0.27, 1) // additive display: pure black would vanish, so use a deep slate
 const PILL = new vec4(0.12, 0.3, 0.8, 1) // saturated blue: stays legible against bright rooms
 const WHITE = new vec4(1, 1, 1, 1)
+const MENU_BACK = new vec4(0.2, 0.26, 0.56, 1) // menu backing: as bright as a dark plate can be on an additive display, so the room behind is lifted and reads as quiet
 const ACCENT = new vec4(0.1, 0.55, 1.0, 1)
+const ARMED = new vec4(0.35, 0.92, 1.0, 1) // Connect armed: a bright cyan fill, clearly different from the blue pills
 
 type Pill = {button: Button; content: ElementContent}
 const PILL_W = 8.6 // the Connect / Remove pills beside a selected object
@@ -103,6 +105,11 @@ export class RuleShiftControls extends BaseScriptComponent {
   private connectObj: SceneObject
   private connectPlate: SceneObject
   private connectPill: Pill
+  private connectHint: Text
+  private createW = 16
+  private createH = 20
+  private createTop = 0
+  private createPlacement: any = null
   private allPills: Pill[] = []
   private pillByName: {[n: string]: Pill} = {}
   private outlinedCount = 0
@@ -241,6 +248,7 @@ export class RuleShiftControls extends BaseScriptComponent {
     this.allPills.forEach((p) => {
       const tc: Text | null = (p.content as any).textComponent
       if (!tc) return
+      tc.horizontalOverflow = HorizontalOverflow.Overflow // pill words never wrap onto a second line
       if (!tc.outlineSettings.enabled) this.outline(tc)
       done++
     })
@@ -272,7 +280,7 @@ export class RuleShiftControls extends BaseScriptComponent {
       const cx = this.toolbarCenters[2]
       this.moreMenu = global.scene.createSceneObject("More Menu")
       this.moreMenu.setParent(this.toolbarRoot)
-      const pl = api.makePlate("More Plate", pwid + pad * 2, hh, 0.4, new vec3(cx, top + hh / 2, Z - 1.2), DARK, -8)
+      const pl = api.makePlate("More Plate", pwid + pad * 2, hh, 0.4, new vec3(cx, top + hh / 2, Z - 1.2), MENU_BACK, -8, true)
       pl.setParent(this.moreMenu)
       const items = [
         {label: "Reset", icon: this.iconReset, fn: () => this.controller.api.reset()},
@@ -281,7 +289,7 @@ export class RuleShiftControls extends BaseScriptComponent {
       ]
       items.forEach((it, i) => {
         const cy = top + hh - pad - ph / 2 - i * (ph + g)
-        const bp = api.makePlate("More Opt " + it.label, pwid, ph, 0.2, new vec3(cx, cy, Z - 0.8), PILL, -7)
+        const bp = api.makePlate("More Opt " + it.label, pwid, ph, 0.2, new vec3(cx, cy, Z - 0.8), PILL, -7, true)
         bp.setParent(this.moreMenu)
         const p = this.makePill(this.moreMenu, "More" + it.label, it.label, it.icon, new vec3(cx, cy, Z + 0.5), new vec2(pwid, ph), 58)
         p.button.onTriggerUp.add(() => {
@@ -290,30 +298,35 @@ export class RuleShiftControls extends BaseScriptComponent {
         })
       })
     }
-    // Create menu
+    // Create menu: compact (about 16 cm wide) with a solid backing plate; it opens above the toolbar, slid sideways into the emptiest spot (placeCreateMenu)
     {
-      const W = 36.4
+      const W = 16.2
       const pad = 0.9
-      const ih = 3.6
+      const ih = 3.4
       const hdr = 2.2
-      const hh = pad + hdr + 0.3 + ih + 0.7 + hdr + 0.3 + ih + 0.7 + 3.4 + pad
+      const saved: string[] = api.savedModels()
+      const savedRows = Math.max(1, Math.ceil(saved.length / 2))
+      const hh = pad + hdr + 0.3 + ih + 0.7 + hdr + 0.3 + savedRows * (ih + 0.7) + 3.4 + pad
       const cx = 0
       this.createMenu = global.scene.createSceneObject("Create Menu")
       this.createMenu.setParent(this.toolbarRoot)
-      const pl = api.makePlate("Create Plate", W, hh, 0.4, new vec3(cx, top + hh / 2, Z - 1.2), DARK, -8)
+      this.createW = W
+      this.createH = hh
+      this.createTop = top
+      const pl = api.makePlate("Create Plate", W, hh, 0.4, new vec3(cx, top + hh / 2, Z - 1.2), MENU_BACK, -8, true)
       pl.setParent(this.createMenu)
       const inner = W - pad * 2
       let yy = top + hh - pad
       const header = (text: string) => {
-        this.makeLabel(this.createMenu, "Hdr " + text, text, 46, new vec4(1, 1, 1, 1), new vec3(cx, yy - hdr / 2, Z + 0.8))
+        this.makeLabel(this.createMenu, "Hdr " + text, text, 42, new vec4(1, 1, 1, 1), new vec3(cx, yy - hdr / 2, Z + 0.8))
         yy -= hdr + 0.3
       }
       const row = (labels: {label: string; icon: Texture | null; fn: () => void}[], text: number) => {
         const g = 0.6
-        const w = (inner - g * (labels.length - 1)) / Math.max(1, labels.length)
+        const w = (inner - g) / 2
         labels.forEach((it, i) => {
           const px = cx - inner / 2 + w / 2 + i * (w + g)
-          const bp = api.makePlate("Create Opt " + it.label, w, ih, 0.2, new vec3(px, yy - ih / 2, Z - 0.8), PILL, -7)
+          const bp = api.makePlate("Create Opt " + it.label, w, ih, 0.2, new vec3(px, yy - ih / 2, Z - 0.8), PILL, -7, true)
           bp.setParent(this.createMenu)
           const p = this.makePill(this.createMenu, "Create" + it.label, it.label, it.icon, new vec3(px, yy - ih / 2, Z + 0.5), new vec2(w, ih), text)
           p.button.onTriggerUp.add(it.fn)
@@ -326,25 +339,28 @@ export class RuleShiftControls extends BaseScriptComponent {
           {label: "Surprise", icon: this.iconSurprise, fn: () => this.surpriseMe()},
           {label: "Speak", icon: this.iconMic, fn: () => this.toggleSpeak()},
         ],
-        64
+        40
       )
       this.speakPill = this.pillByName["CreateSpeak"]
       header("Your creations")
-      const saved: string[] = api.savedModels()
-      row(
-        saved.map((name) => ({label: name, icon: null as Texture | null, fn: () => this.spawnSaved(name)})),
-        58
-      )
+      for (let i = 0; i < saved.length; i += 2) {
+        row(
+          saved.slice(i, i + 2).map((name) => ({label: name, icon: null as Texture | null, fn: () => this.spawnSaved(name)})),
+          50
+        )
+      }
       // the old palette stays reachable, collapsed behind one wide pill
-      const bp = api.makePlate("Create Opt Basic", inner, 3.4, 0.2, new vec3(cx, yy - 1.7, Z - 0.8), PILL, -7)
+      const bp = api.makePlate("Create Opt Basic", inner, 3.4, 0.2, new vec3(cx, yy - 1.7, Z - 0.8), PILL, -7, true)
       bp.setParent(this.createMenu)
-      this.basicPill = this.makePill(this.createMenu, "CreateBasic", "Basic building blocks  ▸", null, new vec3(cx, yy - 1.7, Z + 0.5), new vec2(inner, 3.4), 52)
+      this.basicPill = this.makePill(this.createMenu, "CreateBasic", "Basic building blocks  ▸", null, new vec3(cx, yy - 1.7, Z + 0.5), new vec2(inner, 3.4), 38)
       this.basicPill.button.onTriggerUp.add(() => {
         this.closeMenus()
         this.setPalette(true)
       })
     }
     this.closeMenus()
+    api.test.createPlacement = () => this.createPlacement
+    api.test.connectHintVisible = () => this.connectHint.sceneObject.enabled
     api.test.menuState = () => ({create: this.createMenu.enabled, more: this.moreMenu.enabled, palette: this.palette.enabled})
     api.test.openMenu = (which: string) => this.toggleMenu(which, true)
     api.test.closeMenus = () => this.closeMenus()
@@ -359,9 +375,41 @@ export class RuleShiftControls extends BaseScriptComponent {
     const open = forceOpen ? true : !target.enabled
     this.closeMenus()
     if (open) {
+      if (which === "create") this.placeCreateMenu()
       target.enabled = true
       if (this.palette.enabled) this.setPalette(false)
     }
+  }
+
+  // The Create menu opens above the toolbar, slid sideways to where it covers the least of any object (angular discs from the controller); the choice is made when it opens.
+  private placeCreateMenu() {
+    const api = this.controller.api
+    const discs: {x: number; y: number; r: number}[] = api.nodeDiscs ? api.nodeDiscs() : []
+    const lim = api.view().halfW / -Z // visible half width, angular
+    const hwA = this.createW / 2 / -Z
+    const yLo = this.createTop / -Z
+    const yHi = (this.createTop + this.createH) / -Z
+    const cyA = (yLo + yHi) / 2
+    const hhA = (yHi - yLo) / 2
+    const maxDx = Math.max(0, lim - hwA - 0.005)
+    let best = 0
+    let bestPen = 1e9
+    for (let k = -Math.round(maxDx * -Z); k <= Math.round(maxDx * -Z); k++) {
+      const dxA = k / -Z
+      let pen = 0
+      discs.forEach((d) => {
+        const ddx = Math.max(Math.abs(d.x - dxA) - hwA, 0)
+        const ddy = Math.max(Math.abs(d.y - cyA) - hhA, 0)
+        pen += Math.max(0, d.r - Math.sqrt(ddx * ddx + ddy * ddy))
+      })
+      pen += Math.abs(k) * 1e-5 // tie-break: nearest the centre
+      if (pen < bestPen - 1e-9) {
+        bestPen = pen
+        best = k
+      }
+    }
+    this.createMenu.getTransform().setLocalPosition(new vec3(best, 0, 0))
+    this.createPlacement = {dx: best, penetration: Math.max(0, bestPen - Math.abs(best) * 1e-5), rect: {x: best / -Z, y: cyA, hw: hwA, hh: hhA}}
   }
 
   private closeMenus() {
@@ -661,6 +709,8 @@ export class RuleShiftControls extends BaseScriptComponent {
     this.connectObj.enabled = false
     this.connectPlate.enabled = false
     this.connectPill.button.onTriggerUp.add(() => this.controller.api.connectSelected())
+    this.connectHint = this.makeLabel(this.sceneObject, "ConnectHint", "Tap another object", 50, new vec4(1, 0.95, 0.45, 1), new vec3(0, 0, -70))
+    this.connectHint.sceneObject.enabled = false
   }
 
   private connectPlateColor(): number[] {
@@ -677,6 +727,7 @@ export class RuleShiftControls extends BaseScriptComponent {
       this.deletePlate.enabled = false
       this.connectObj.enabled = false
       this.connectPlate.enabled = false
+      this.connectHint.sceneObject.enabled = false
       if (api.setPillRect) api.setPillRect(null)
       return
     }
@@ -706,7 +757,16 @@ export class RuleShiftControls extends BaseScriptComponent {
     this.deleteObj.getTransform().setWorldPosition(new vec3(cx * D, (cy - off) * D, -D))
     this.deletePlate.getTransform().setWorldPosition(new vec3(cx * D, (cy - off) * D, -D - 0.6))
     const armed = !!api.connectArmed && api.connectArmed()
-    this.connectPlate.getComponent("Component.RenderMeshVisual").mainPass.baseColor = armed ? ACCENT : PILL
+    this.connectPlate.getComponent("Component.RenderMeshVisual").mainPass.baseColor = armed ? ARMED : PILL
+    // armed: a hint beside the pills (above them, or below when they sit at the top of the view)
+    this.connectHint.sceneObject.enabled = armed
+    if (armed) {
+      const topY = (v.halfH / -Z) * D * 0.94
+      const above = (cy + off) * D + PILL_H / 2 + 1.5
+      const hy = above + 1 < topY ? above : (cy - off) * D - PILL_H / 2 - 1.5
+      const hx = Math.max(-lim * D + 5, Math.min(lim * D - 5, cx * D))
+      this.connectHint.sceneObject.getTransform().setWorldPosition(new vec3(hx, hy, -D + 0.8))
+    }
     // tell the controller where the pills are on screen so link labels keep clear of them (angular space)
     if (api.setPillRect) api.setPillRect({x: cx, y: cy, hw: hw + 0.002, hh: hh})
   }

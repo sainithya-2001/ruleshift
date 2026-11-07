@@ -263,7 +263,7 @@ function deleteNode(n) {
         if (slots[k].A === n || slots[k].B === n) { destroySlot(slots[k]); }
     }
     var nm = n.obj.name;
-    if (selNode === n) { selNode = null; }
+    if (selNode === n) { selNode = null; connectArmed = false; }
     if (pendingPlace === n) { pendingPlace = null; }
     nodes.splice(i, 1);
     n.obj.destroy();
@@ -465,7 +465,7 @@ function slotFor(A, B, create) {
 var selNode = null;
 function handleTapNode(n) {
     if (!selNode) { selNode = n; print("RULESHIFT selected " + n.obj.name); return; }
-    if (selNode === n) { selNode = null; print("RULESHIFT selection cancelled"); return; }
+    if (selNode === n) { selNode = null; connectArmed = false; print("RULESHIFT selection cancelled"); return; }
     var c = slotFor(selNode, n, true);
     if (!c.active) { activateLink(c, RULES.ATTRACT, false); }
     else { print("RULESHIFT already linked"); }
@@ -498,18 +498,38 @@ function clearLinks() {
     selNode = null; connectArmed = false;
     print("RULESHIFT links cleared");
 }
+var armHalo = null, armHaloPass = null;
+function updateArmHalo() {   // Connect armed: a bright pulsing halo behind the selected object until the link is made or cancelled
+    var on = connectArmed && !!selNode;
+    if (!on) { if (armHalo) { armHalo.enabled = false; } return; }
+    if (!armHalo) {
+        armHalo = global.scene.createSceneObject("Connect Halo");
+        var par = NODE_TMPL.getParent(); if (par) { armHalo.setParent(par); }
+        armHalo.layer = NODE_TMPL.layer;
+        var hv = armHalo.createComponent("Component.RenderMeshVisual");
+        hv.mesh = SPHERE_MESH; hv.mainMaterial = SPHERE_MAT.clone();
+        hv.mainPass.blendMode = BlendMode.Add; hv.mainPass.depthWrite = false; hv.mainPass.depthTest = false; hv.setRenderOrder(3);
+        armHaloPass = hv.mainPass;
+    }
+    var k = 0.5 + 0.5 * Math.sin(elapsed * 6);
+    armHalo.enabled = true;
+    armHalo.getTransform().setLocalPosition(selNode.pos);
+    armHalo.getTransform().setLocalScale(vec3.one().uniformScale(selNode.radius * 2 * (0.82 + 0.08 * k) / SPHERE_D));
+    armHaloPass.baseColor = new vec4(0.04, 0.22 + 0.1 * k, 0.36 + 0.1 * k, 1);
+}
 function updateSelection() {
     nodes.forEach(function (n) {
         if (n.pulse >= 0) { return; }
         if (n === selNode) {
             var k = 0.5 + 0.5 * Math.sin(elapsed * 8);
-            setNodeColor(n, lerp4(n.color, new vec4(1, 1, 1, 1), 0.55));
-            n.tr.setLocalScale(n.baseScale.uniformScale(1.1 + 0.1 * k));
+            setNodeColor(n, connectArmed ? lerp4(n.color, new vec4(0.35, 0.95, 1, 1), 0.75) : lerp4(n.color, new vec4(1, 1, 1, 1), 0.55));
+            n.tr.setLocalScale(n.baseScale.uniformScale((connectArmed ? 1.15 : 1.1) + (connectArmed ? 0.15 : 0.1) * k));
             n.selShown = true;
         } else if (n.selShown) {
             setNodeColor(n, n.color); n.tr.setLocalScale(n.baseScale); n.selShown = false;
         }
     });
+    updateArmHalo();
 }
 
 function cycleRule(c, why) {   // a manual edit: the rule changes at once and a short pulse crosses the link so it feels physical
@@ -827,11 +847,56 @@ function labelHitsNode(p, e, self) {   // compare in screen (angular) space: lab
     return false;
 }
 var labelsAll = false;   // test hook: the suite measures every label; in play only the selected connection shows its rule name
+function labelInView(P, e) {   // the whole label rectangle (centre P, half-size e.hw/e.hh) inside the visible view and above the toolbar
+    var dp = Math.max(-P.z, 1), v = script.api.view(), lx = P.x / dp, ly = P.y / dp, hw = e.hw / dp, hh = e.hh / dp;
+    return Math.abs(lx) + hw <= v.halfW / -WORLD_Z * 0.96 && ly + hh <= v.halfH / -WORLD_Z * 0.94 && ly - hh >= toolbarTopAng + 0.01;
+}
+function labelPenalty(p, e, self) {   // how much a label rectangle (object position p) overlaps nodes (80% discs), UI rectangles and other labels, in angular units; 0 = clear
+    var dep = Math.max(-p.z, 1), lx = (p.x + e.ox) / dep, ly = (p.y + e.oy) / dep, hw = e.hw / dep, hh = e.hh / dep, pen = 0;
+    for (var i = 0; i < nodes.length; i++) {
+        var n = nodes[i], nd = Math.max(-n.pos.z, 1), nr = n.radius * 0.8 / nd;
+        var dx = Math.max(Math.abs(lx - n.pos.x / nd) - hw, 0), dy = Math.max(Math.abs(ly - n.pos.y / nd) - hh, 0), d = Math.sqrt(dx * dx + dy * dy);
+        if (d < nr) { pen += nr - d; }
+    }
+    var rs = [pillRect, testPill, cardRect];
+    for (var pi = 0; pi < 3; pi++) { var pr = rs[pi]; if (pr && Math.abs(lx - pr.x) < hw + pr.hw && Math.abs(ly - pr.y) < hh + pr.hh) { pen += 0.1; } }
+    for (var j = 0; j < placedLabels.length; j++) { var r = placedLabels[j]; if (r.c !== self && Math.abs(lx - r.x) < hw + r.hw && Math.abs(ly - r.y) < hh + r.hh) { pen += 0.1; } }
+    return pen;
+}
+function placeRoomLabel(c, A, B) {   // room scale: the selected link's label sits at the beam's own midpoint, beside the beam and a little toward the camera; if that spot is crowded it slides sideways along the beam, never far
+    var C = c.arcC || A.add(B).uniformScale(0.5), M = beamPoint(A, C, B, 0.5);
+    var dx = B.x - A.x, dy = B.y - A.y, dl = Math.sqrt(dx * dx + dy * dy), tx = dl > 0.01 ? dx / dl : 1, ty = dl > 0.01 ? dy / dl : 0;
+    var nx = -ty, ny = tx; if (ny < -0.001 || (Math.abs(ny) <= 0.001 && nx < 0)) { nx = -nx; ny = -ny; }   // prefer the upper side of the beam
+    var toCam = M.uniformScale(-1 / Math.max(M.length, 0.01)), base = M.add(toCam.uniformScale(3 * K));
+    c.labelTr.setWorldScale(vec3.one().uniformScale(Math.max(1, Math.min(3, -base.z / -WORLD_Z))));
+    c.label.text = LABEL_TEXT[c.rule];
+    var e = labelExtent(c), pos = null;
+    if (!e) { pos = base.add(new vec3(nx * 5 * K, ny * 5 * K, 0)); }
+    else {
+        var gap = 0.9 * K * c.labelTr.getWorldScale().x, off = Math.abs(nx) * e.hw + Math.abs(ny) * e.hh + gap, step = (Math.abs(tx) * e.hw + Math.abs(ty) * e.hh) * 0.7 + 0.5 * K;
+        var ks = [0, 1, -1, 2, -2], bestCost = 1e9, order = 0;   // candidates: ideal spot first, then sliding along the beam on either side; the least overlapping nearby one wins
+        for (var ki = 0; ki < ks.length; ki++) {
+            for (var si = 0; si < 2; si++, order++) {
+                var sg = si === 0 ? 1 : -1, P = base.add(new vec3(nx * sg * off + tx * ks[ki] * step, ny * sg * off + ty * ks[ki] * step, 0)), op = P.sub(new vec3(e.ox, e.oy, 0));
+                if (!labelInView(P, e)) { continue; }
+                var dpP = Math.max(-P.z, 1), cost = labelPenalty(op, e, c) + 0.1 * Math.sqrt((P.x - M.x) * (P.x - M.x) + (P.y - M.y) * (P.y - M.y)) / dpP + order * 0.0001;   // overlap, plus a pull toward the beam midpoint so the label never wanders off
+                if (cost < bestCost) { bestCost = cost; pos = op; }
+            }
+        }
+        if (!pos) { pos = base.add(new vec3(nx * off, ny * off, 0)).sub(new vec3(e.ox, e.oy, 0)); }
+    }
+    c.labelNudge = 0;
+    if (e) { var dd = Math.max(-pos.z, 1); c.lblRect = { c: c, x: (pos.x + e.ox) / dd, y: (pos.y + e.oy) / dd, hw: e.hw / dd, hh: e.hh / dd }; placedLabels.push(c.lblRect); }
+    c.labelTr.setWorldPosition(pos);
+    var kk = RULE_COLOR[c.rule];
+    c.label.textFill.color = new vec4(kk.r, kk.g, kk.b, labelAlpha);
+}
 function updateLabel(c) {
     var shown = labelsAll || editorLink === c;
     c.labelObj.enabled = shown && c.active;
     if (!shown) { c.lblRect = null; c.labelNudge = 0; return; }
     var A = c.A.pos, B = c.B.pos;
+    if (roomMode()) { placeRoomLabel(c, A, B); return; }
     var mid = A.add(B).uniformScale(0.5);
     var toCam = mid.uniformScale(-1 / Math.max(mid.length, 0.01));   // camera is at the origin
     var cx = 0; nodes.forEach(function (n) { cx += n.pos.x / nodes.length; });   // side links push their labels outward so labels don't pile up
@@ -845,10 +910,6 @@ function updateLabel(c) {
     // never sit on top of an object: if the label's screen footprint touches any node, nudge it upward until clear
     var ext = labelExtent(c), nudged = 0, nstep = LABEL_NUDGE_STEP * lscale, nmax = LABEL_NUDGE_MAX * K;
     if (ext) { while (nudged < nmax && labelHitsNode(lp, ext, c)) { lp = lp.add(new vec3(0, nstep, 0)); nudged += nstep; } }
-    if (ext && roomMode()) {   // keep the whole label on screen vertically (nudging up or a high link could push it past the top edge)
-        var dpy = Math.max(-lp.z, 1), v = script.api.view(), ymax = v.halfH / -WORLD_Z * dpy * 0.94 - ext.hh - ext.oy;
-        if (lp.y > ymax) { nudged = Math.max(0, nudged - (lp.y - ymax)); lp = new vec3(lp.x, ymax, lp.z); }
-    }
     c.labelNudge = nudged;
     if (ext) { var ddp = Math.max(-lp.z, 1); c.lblRect = { c: c, x: (lp.x + ext.ox) / ddp, y: (lp.y + ext.oy) / ddp, hw: ext.hw / ddp, hh: ext.hh / ddp }; placedLabels.push(c.lblRect); }
     c.labelTr.setWorldPosition(lp);
@@ -857,6 +918,25 @@ function updateLabel(c) {
     c.label.textFill.color = new vec4(k.r, k.g, k.b, labelAlpha);
 }
 function beamPoint(A, C, B, u) { var a = (1 - u) * (1 - u), b = 2 * u * (1 - u), d = u * u; return new vec3(A.x * a + C.x * b + B.x * d, A.y * a + C.y * b + B.y * d, A.z * a + C.z * b + B.z * d); }
+var ARC_SIMILAR = 0.77;   // cos 40 deg: two beams leaving one node closer than this in direction would run along each other
+function arcTarget(c) {   // signed arc height multiplier (presentation only): beams that leave a node in similar directions arc to opposite sides, taller, so they read as separate
+    for (var si = 0; si < 2; si++) {
+        var S = si === 0 ? c.A : c.B, O = si === 0 ? c.B : c.A;
+        var ux = O.pos.x - S.pos.x, uy = O.pos.y - S.pos.y, ul = Math.sqrt(ux * ux + uy * uy);
+        if (ul < 0.01) { continue; }
+        ux /= ul; uy /= ul;
+        var rank = 0, any = false, myI = slots.indexOf(c);
+        for (var k = 0; k < slots.length; k++) {
+            var d = slots[k];
+            if (d === c || !d.active || (d.A !== S && d.B !== S)) { continue; }
+            var P = d.A === S ? d.B : d.A, vx = P.pos.x - S.pos.x, vy = P.pos.y - S.pos.y, vl = Math.sqrt(vx * vx + vy * vy);
+            if (vl < 0.01 || (ux * vx + uy * vy) / vl < ARC_SIMILAR) { continue; }
+            any = true; if (k < myI) { rank++; }
+        }
+        if (any) { return (rank % 2 === 0 ? 1 : -1) * (si === 0 ? 1 : -1) * (1.9 + Math.floor(rank / 2)); }
+    }
+    return 1;
+}
 function updateVisual(c) {
     if (!perf.beams) { return; }
     var A = c.A.pos, B = c.B.pos;
@@ -876,7 +956,8 @@ function updateVisual(c) {
     }
     var w = Math.max(0.45 * K, Math.min(c.A.radius, c.B.radius) * (roomMode() ? 0.07 : 0.16)) * (1 + 1.2 * pk);   // thin beam: ~1 cm in the room (objects are 2.4x bigger on screen, so the same 0.16 radius ratio read as a fat band); never thinner than 0.45 cm at stage scale
     // gentle arc: always bulges to the left of A -> B, so it never flips side while objects move
-    var perp = new vec3(-dir.y, dir.x, 0), h = Math.min(0.12 * dist, 4 * K);
+    var arcT = arcTarget(c); c.arcAmt = c.arcAmt === undefined ? arcT : c.arcAmt + (arcT - c.arcAmt) * (1 - Math.exp(-8 * Math.max(lastDt, 0.016)));
+    var perp = new vec3(-dir.y, dir.x, 0), h = Math.min(0.12 * dist, 4 * K) * c.arcAmt;
     var mid = A.add(B).uniformScale(0.5), C = mid.add(perp.uniformScale(2 * h));
     c.arcC = C;
     var prev = A;
@@ -1251,7 +1332,7 @@ function resetWorld() {   // restores positions; created objects and links are k
     });
     clearCause(); contacts = {}; pendingRewrite = null;
     connections.forEach(function (c) { c.cooldownUntil = 0; c.touching = false; updateVisual(c); });
-    selNode = null;
+    selNode = null; connectArmed = false;
     if (goalEnabled) { goalStage = 0; settleTime = 0; goalText.text = GOAL_1; nextText.text = "Next: " + GOAL_2; }
     setState("creation");
 }
@@ -1385,10 +1466,11 @@ script.api.selectedInfo = function () {
     return { x: selNode.pos.x, y: selNode.pos.y, z: selNode.pos.z, r: selNode.radius, busy: !!(selNode.job && selNode.job.cap) };
 };
 // UI helpers for the palette (TypeScript side): an opaque plate and a round colour swatch, built from the shared meshes.
-script.api.makePlate = function (name, w, h, d, pos, col, order) {
+script.api.makePlate = function (name, w, h, d, pos, col, order, solid) {
     var o = global.scene.createSceneObject(name);
     var v = o.createComponent("Component.RenderMeshVisual");
     v.mesh = LINK_MESH; v.mainMaterial = SPHERE_MAT.clone(); v.mainPass.baseColor = col;
+    if (solid) { v.mainPass.blendMode = BlendMode.Normal; v.mainPass.depthWrite = false; }   // opaque backing: the room behind does not show through as noise
     if (order !== undefined) { v.mainPass.depthTest = false; v.setRenderOrder(order); }   // drawn beneath the UI buttons regardless of depth
     var mn = LINK_MESH.aabbMin, mx = LINK_MESH.aabbMax;
     var mw = Math.max(mx.x - mn.x, 0.0001), ml = Math.max(mx.y - mn.y, 0.0001), md = Math.max(mx.z - mn.z, 0.0001);
@@ -1480,6 +1562,9 @@ script.api.test = {
     place: function (i, v) { var n = nodes[i]; n.pos = new vec3(v.x, v.y, v.z); n.vel = vec3.zero(); n.tr.setLocalPosition(n.pos); if (pendingPlace === n) { pendingPlace = null; } },
     connect: function (i, j, rule) { var c = slotFor(nodes[i], nodes[j], true); if (!c.active) { activateLink(c, rule || RULES.ATTRACT, true); } return c; },
     labelInfo: function (c) { var e = labelExtent(c); var p = c.labelTr.getWorldPosition(); return { ext: e, nudge: c.labelNudge, y: p.y, hits: e ? labelHitsNode(p, e, c) : null }; },
+    labelToMid: function (c) { var C = c.arcC || c.A.pos.add(c.B.pos).uniformScale(0.5), M = beamPoint(c.A.pos, C, c.B.pos, 0.5), e = labelExtent(c), p = c.labelTr.getWorldPosition(); if (!e) { return -1; } var dx = p.x + e.ox - M.x, dy = p.y + e.oy - M.y; return Math.sqrt(dx * dx + dy * dy); },
+    labelFits: function (c) { var e = labelExtent(c); return !!e && labelInView(c.labelTr.getWorldPosition().add(new vec3(e.ox, e.oy, 0)), e); },
+    armHaloOn: function () { return !!armHalo && armHalo.enabled; },
     fires: function (c) { return c.fires || 0; },
     hintVisible: function () { return hintObj.enabled; },
     labelOverlaps: function () { var n = 0, cs = connections; for (var i = 0; i < cs.length; i++) { for (var j = i + 1; j < cs.length; j++) { var a = cs[i].lblRect, b = cs[j].lblRect; if (a && b && Math.abs(a.x - b.x) < a.hw + b.hw && Math.abs(a.y - b.y) < a.hh + b.hh) { n++; } } } return n; },
@@ -1564,6 +1649,7 @@ script.createEvent("OnStartEvent").bind(function () {
 });
 
 // ---------- No stage: the world is the user's room (see ROOM / FLOOR_Y / TABLE_Y above). The glowing placement disc was removed; objects rest on real surfaces or float. ----------
+script.api.nodeDiscs = function () { return nodes.map(function (n) { var dp = Math.max(-n.pos.z, 1); return { x: n.pos.x / dp, y: n.pos.y / dp, r: n.radius / dp }; }); };   // angular discs, so the Create menu can open in empty space
 script.api.view = function () {   // visible half-extents (cm) at the world's depth, for placing UI at the edges
     var c = script.camera, hh = Math.tan(c.fov / 2) * Math.abs(WORLD_Z);
     return { halfW: hh * c.aspect, halfH: hh, stageR: STAGE_R };

@@ -942,7 +942,7 @@ if (script.runTests) {
         api.loadUniverse(); yield 0.8;
         var cn24 = T.connections, bi = cn24.map(function (c) { return T.beamInfo(c); });
         check("24 every connection is a beam of 8 segments with 3 motes", cn24.length === 3 && bi.every(function (b) { return b.segs === 8 && b.motes === 3 && b.root; }), JSON.stringify(bi.map(function (b) { return b.segs + "/" + b.motes; })));
-        check("24 beams arc gently (mid-point off the straight line, but not wildly)", bi.every(function (b) { return b.bulge > 0.3 && b.bulge < 6; }), bi.map(function (b) { return b.bulge.toFixed(2); }).join());
+        check("24 beams arc gently (mid-point off the straight line, but not wildly)", bi.every(function (b) { return b.bulge > 0.3 && b.bulge < 10; }), bi.map(function (b) { return b.bulge.toFixed(2); }).join());
         check("24 labels are hidden by default (no selected link)", cn24.every(function (c) { return !c.labelObj.enabled; }));
         T.openEditor(cn24[1]); yield 0.4;
         check("24 only the selected connection shows its rule name", cn24[1].labelObj.enabled && !cn24[0].labelObj.enabled && !cn24[2].labelObj.enabled && cn24[1].label.text === "ATTRACT", cn24.map(function (c) { return c.labelObj.enabled; }).join());
@@ -1009,6 +1009,30 @@ if (script.runTests) {
         var d1 = rn[1].pos.distance(rn[2].pos);
         check("25 story: the cat flees from the lantern", d1 > d0 + 5, d0.toFixed(0) + " -> " + d1.toFixed(0));
         check("25 room physics stays inside the volume and never overlaps", violations.bounds === 0 && violations.overlap === 0, "bounds " + violations.bounds + " overlap " + violations.overlap);
+        T.openEditor(conns[1]); yield 0.3; var dR0 = rn[1].pos.distance(rn[2].pos), okA = api.applyEditorRule("ATTRACT"); yield 4; var dR1 = rn[1].pos.distance(rn[2].pos);
+        check("25 story: switching cat-lantern back to Attract brings the cat clearly back toward the lantern", okA && conns[1].rule === "ATTRACT" && dR1 < dR0 - 8, dR0.toFixed(0) + " -> " + dR1.toFixed(0));
+
+        // 26. Presentation: the selected link's label beside its own beam, separated arcs, the Create menu in empty space, the armed Connect state
+        api.reset(); yield 0.3; T.labelsAll(false);
+        var c26 = conns[1]; T.openEditor(c26); yield 0.5;
+        check("26 the selected link's label sits at its own beam midpoint (beside it, in view, never far)", T.labelToMid(c26) >= 0 && T.labelToMid(c26) < 16 && T.labelFits(c26), "gap " + T.labelToMid(c26).toFixed(1));
+        T.closeEditor();
+        var ex26 = api.spawn({ shape: "sphere", sizeKey: "M", bounce: "low", weight: "light" }); T.place(ex26, new vec3(6, -4, -125)); var cx26 = T.connect(1, ex26, "ATTRACT"); yield 1.5;
+        check("26 two beams leaving the cat in similar directions arc to opposite sides, taller", c26.arcAmt * cx26.arcAmt < 0 && Math.abs(c26.arcAmt) > 1.5 && Math.abs(cx26.arcAmt) > 1.5, c26.arcAmt.toFixed(2) + " / " + cx26.arcAmt.toFixed(2));
+        check("26 the two arcs are clearly separate (control points more than 10 cm apart)", c26.arcC.distance(cx26.arcC) > 10, c26.arcC.distance(cx26.arcC).toFixed(1));
+        T.openEditor(cx26); yield 0.5;
+        check("26 even in a crowded spot the label stays near its own beam midpoint and in view", T.labelToMid(cx26) < 22 && T.labelFits(cx26), "gap " + T.labelToMid(cx26).toFixed(1));
+        T.closeEditor(); T.deleteNode(ex26); yield 0.3;
+        T.openMenu("create"); yield 0.3; var cp26 = T.createPlacement(), lim26 = api.view().halfW / 95;
+        check("26 the Create menu opens in empty space: it covers no object and stays inside the view", cp26 && cp26.penetration < 0.001 && Math.abs(cp26.rect.x) + cp26.rect.hw <= lim26 + 0.001, cp26 ? "pen " + cp26.penetration.toFixed(4) : "none");
+        T.closeMenus(); yield 0.2;
+        T.tap(1); yield 0.2; api.connectSelected(); yield 0.5;
+        check("26 Connect armed: bright fill, a hint beside the pill, the object highlighted", api.connectArmed() && T.connectColor()[1] > 0.8 && T.connectHintVisible() && T.armHaloOn(), JSON.stringify(T.connectColor()) + " hint " + T.connectHintVisible() + " halo " + T.armHaloOn());
+        T.tap(1); yield 0.5;
+        check("26 cancelling the selection disarms Connect and clears the hint and highlight", !api.connectArmed() && !T.connectHintVisible() && !T.armHaloOn(), "armed " + api.connectArmed());
+        T.tap(1); yield 0.3;
+        check("26 selecting an object again does not start armed", !api.connectArmed() && T.selected() === 1);
+        T.tap(1); yield 0.2;
         api.reset(); yield 0.3;
         T.setWorldScale(1); api.clearAll();
 
