@@ -400,7 +400,7 @@ export class RuleShiftControls extends BaseScriptComponent {
       boxes.forEach((b) => (size = Math.min(size, Math.floor(TOOLBAR_TEXT_PROBE * 0.92 * Math.min(allowed / b.w, allowedH / b.h)))))
       size = Math.max(TOOLBAR_TEXT_MIN, size)
       this.labelTextSize = size
-      this.toolbarPills.forEach((p) => (p.content.textSize = size))
+      this.toolbarPills.forEach((p, i) => (p.content.textSize = this.toolbarLabels[i] === "…" ? Math.round(size * 1.45) : size)) // the lone ellipsis glyph is tiny at word size
       this.fitStage = 1
       this.fitFrame = 0 // re-measure a few frames later, once the new size has laid out
       return

@@ -845,6 +845,10 @@ function updateLabel(c) {
     // never sit on top of an object: if the label's screen footprint touches any node, nudge it upward until clear
     var ext = labelExtent(c), nudged = 0, nstep = LABEL_NUDGE_STEP * lscale, nmax = LABEL_NUDGE_MAX * K;
     if (ext) { while (nudged < nmax && labelHitsNode(lp, ext, c)) { lp = lp.add(new vec3(0, nstep, 0)); nudged += nstep; } }
+    if (ext && roomMode()) {   // keep the whole label on screen vertically (nudging up or a high link could push it past the top edge)
+        var dpy = Math.max(-lp.z, 1), v = script.api.view(), ymax = v.halfH / -WORLD_Z * dpy * 0.94 - ext.hh - ext.oy;
+        if (lp.y > ymax) { nudged = Math.max(0, nudged - (lp.y - ymax)); lp = new vec3(lp.x, ymax, lp.z); }
+    }
     c.labelNudge = nudged;
     if (ext) { var ddp = Math.max(-lp.z, 1); c.lblRect = { c: c, x: (lp.x + ext.ox) / ddp, y: (lp.y + ext.oy) / ddp, hw: ext.hw / ddp, hh: ext.hh / ddp }; placedLabels.push(c.lblRect); }
     c.labelTr.setWorldPosition(lp);

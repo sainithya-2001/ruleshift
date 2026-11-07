@@ -32,7 +32,7 @@ Small UI, big few buttons, only what is needed. All in `Assets/Scripts/RuleShift
 - **Bright rooms**: every pill has its own saturated blue plate (`PILL`), the Button's grey plate is hidden (`opacity = 0`), pill text is white with a dark outline (`updateOutlines`), captions/status are outlined.
 - Test hooks: `api.test.openMenu('create'|'more')`, `closeMenus`, `menuState`, `menuPills`, `statusText`, `forceVoice`, `connectColor`; tests object flag `showUi` (room preset, holds 24 s each on: nothing selected, Create menu, object selected, connection selected).
 - Screenshots (default camera, room preset): `devpost/screenshots/ui-nothing-selected.jpg`, `ui-create-menu.jpg`, `ui-object-selected.jpg`, `ui-connection-selected.jpg`.
-- Not done / honest limits: only the toolbar follows the head; the object pills, rule editor and card are still anchored in angular space at the world plane (fine for a fixed Preview camera, untested head-moving on device). The selected link's rule label can clip at the top or right edge of the view (existing label placement; seen in `ui-connection-selected.jpg`). The Create menu covers part of the room while open. The "…" glyph renders small. Real taps on the new pills are untested (tests call the same handlers).
+- Not done / honest limits: only the toolbar follows the head; the object pills, rule editor and card are still anchored in angular space at the world plane (fine for a fixed Preview camera, untested head-moving on device). The Create menu covers part of the room while open. Real taps on the new pills are untested (tests call the same handlers).
 
 ## Workflow rules
 - Tests must pass before each commit; commit and push per step; retune test values, never delete checks; keep reports short.
