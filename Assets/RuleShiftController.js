@@ -1246,7 +1246,7 @@ function updateModelLife(dt) {
 }
 
 // ---------- ambient sparkles: a few soft motes drifting up from glowing objects ----------
-var AMB_MAX = 10, AMB_LIFE = 1.8, AMB_RATE = 4.5, ambPool = [], ambActive = [], ambAcc = 0, ambSeed = 12345, ambRound = 0;
+var AMB_MAX = 6, AMB_LIFE = 1.8, AMB_RATE = 4.5, ambPool = [], ambActive = [], ambAcc = 0, ambSeed = 12345, ambRound = 0;
 function ambRand() { ambSeed = (ambSeed * 1664525 + 1013904223) % 4294967296; return ambSeed / 4294967296; }
 function glowEmitters() { var out = []; nodes.forEach(function (n) { var k = n.modelRoot ? modelKind(n) : null; if (k === "lantern" || k === "flower" || (n.glowOn && !n.modelRoot)) { out.push(n); } }); return out; }
 // Asset Library VFX (see README CREDITS): Embers drift off the lantern, Sparkles hover over the flower; each is only on while its object exists.
@@ -1257,7 +1257,8 @@ function updateVfx() {
     var lan = null, flo = null;
     nodes.forEach(function (n) { var k = n.modelRoot ? modelKind(n) : null; if (k === "lantern") { lan = n; } else if (k === "flower") { flo = n; } });
     if (script.sparklesVfx && script.sparklesVfx.enabled) { script.sparklesVfx.enabled = false; }   // the stock white-star Sparkles VFX wandered to the view edge as a stray star; the pink motes of the ambient sparkles stay
-    [[script.embersVfx, lan, 0.1]].forEach(function (e) {
+    if (script.embersVfx && script.embersVfx.enabled) { script.embersVfx.enabled = false; }   // the stock Embers VFX scattered red specks across the whole view; fireflies (updateMagic) replace it
+    [].forEach(function (e) {
         var o = e[0], n = e[1]; if (!o) { return; }
         if (o.enabled !== !!n) { o.enabled = !!n; }
         if (n) { var t = o.getTransform(); t.setWorldPosition(n.pos.add(new vec3(0, n.radius * e[2], 0.5 * K))); t.setWorldScale(vec3.one().uniformScale(n.radius / 12)); }
@@ -1298,6 +1299,50 @@ function updateAmbient(dt) {
         s.tr.setLocalScale(vec3.one().uniformScale(s.size * K * (1 - 0.3 * u) / SPHERE_D));
         s.pass.baseColor = new vec4(s.col.r * al, s.col.g * al, s.col.b * al, al);
     }
+}
+
+// ---------- ambient magic: a few fireflies around the lantern, slow dust motes in the air (the lotus's petals/motes are the ambient sparkles above). Hard caps, always kept inside the view. ----------
+var FIREFLY_MAX = 5, AIR_MAX = 5, magicPool = [], fireflies = [], airMotes = [];
+function magicSprite() {
+    var o = global.scene.createSceneObject("Magic Mote"), par = NODE_TMPL.getParent();
+    if (par) { o.setParent(par); } o.layer = NODE_TMPL.layer; o.enabled = false;
+    var v = o.createComponent("Component.RenderMeshVisual");
+    v.mesh = SPHERE_MESH; v.mainMaterial = SPHERE_MAT.clone();
+    v.mainPass.blendMode = BlendMode.Add; v.mainPass.depthWrite = false; v.mainPass.depthTest = false; v.setRenderOrder(6);
+    var sp = { o: o, tr: o.getTransform(), pass: v.mainPass }; magicPool.push(sp); return sp;
+}
+function airSpawn(m, first) {
+    var vw = script.api.view(), x = (ambRand() * 2 - 1) * vw.halfW * 1.25 * 0.7, y0 = FLOOR_Y + 8, y1 = ROOM.yMax - 4;
+    m.p = new vec3(x, first ? y0 + ambRand() * (y1 - y0) : y0 + ambRand() * 6, -125 - ambRand() * 8);
+    m.age = first ? ambRand() * 6 : 0; m.life = 6 + 3 * ambRand(); m.ph = ambRand() * 6.28; m.size = 0.35 + 0.3 * ambRand();
+}
+function updateMagic(dt) {
+    var on = perf.ambient && roomMode() && nodes.length > 0, lan = null;
+    nodes.forEach(function (n) { if (n.modelRoot && modelKind(n) === "lantern") { lan = n; } });
+    while (fireflies.length < FIREFLY_MAX) { var f = magicSprite(); f.a = 0.5 + 1.3 * fireflies.length / FIREFLY_MAX; f.b = 0.7 + 0.5 * ambRand(); f.ph = ambRand() * 6.28; f.rho = 1.3 + 0.9 * fireflies.length / FIREFLY_MAX; f.blink = 0.9 + 0.8 * ambRand(); fireflies.push(f); }
+    while (airMotes.length < AIR_MAX) { var m = magicSprite(); airSpawn(m, true); airMotes.push(m); }
+    var vw = script.api.view(), limX = vw.halfW / -WORLD_Z * 0.9, limY = vw.halfH / -WORLD_Z * 0.9;
+    fireflies.forEach(function (f) {
+        f.o.enabled = on && !!lan; if (!f.o.enabled) { return; }
+        var t = fxT * 0.45 + f.ph, r = lan.radius * f.rho, z = lan.pos.z + 0.6 * K;
+        var px = lan.pos.x + Math.cos(t * f.a) * r, py = lan.pos.y + Math.sin(t * f.b * 1.3) * r * 0.75, dp = Math.max(-z, 1);
+        px = Math.max(-limX * dp, Math.min(limX * dp, px)); py = Math.max(-limY * dp, Math.min(limY * dp, py));
+        var bl = Math.max(0, Math.sin(fxT * f.blink * 2.2 + f.ph)), al = 0.25 + 0.7 * bl * bl;
+        f.tr.setWorldPosition(new vec3(px, py, z));
+        f.tr.setLocalScale(vec3.one().uniformScale(0.6 * K * (0.8 + 0.4 * bl) / SPHERE_D));
+        f.pass.baseColor = new vec4(1.0 * al, 0.88 * al, 0.35 * al, al);
+    });
+    airMotes.forEach(function (m) {
+        m.o.enabled = on; if (!on) { return; }
+        m.age += dt; if (m.age >= m.life) { airSpawn(m, false); }
+        var u = m.age / m.life, al = Math.sin(Math.PI * u) * 0.5;
+        m.p = m.p.add(new vec3(Math.sin(m.age * 0.9 + m.ph) * 0.5 * K * dt, 0.45 * K * dt, 0));
+        var dp = Math.max(-m.p.z, 1);
+        if (Math.abs(m.p.x / dp) > limX || Math.abs(m.p.y / dp) > limY) { al = 0; }
+        m.tr.setWorldPosition(m.p);
+        m.tr.setLocalScale(vec3.one().uniformScale(m.size * K / SPHERE_D));
+        m.pass.baseColor = new vec4(1.0 * al, 0.82 * al, 0.55 * al, al);
+    });
 }
 
 // ---------- light pools: soft coloured glow on the room around the glowing creations (additive nested discs, no real lights) ----------
@@ -1871,6 +1916,7 @@ script.api.test = {
     },
     lifeInfo: function (i) { var n = nodes[i]; if (!n.modelRoot) { return null; } var q = n.modelRoot.getTransform(); return { kind: modelKind(n), rot: q.getLocalRotation().toEulerAngles(), pos: q.getLocalPosition(), scale: q.getLocalScale(), yaw: n.lifeYaw || 0, move: n.lifeMove || 0 }; },
     ambientCount: function () { return ambActive.length; },
+    magicCount: function () { var c = 0; fireflies.concat(airMotes).forEach(function (m) { if (m.o.enabled) { c++; } }); return c; }, magicMax: FIREFLY_MAX + AIR_MAX,
     ambientMax: AMB_MAX,
     linkColor: function (c) { var k = c.rmv.mainPass.baseColor; return k.r.toFixed(2) + "," + k.g.toFixed(2) + "," + k.b.toFixed(2); },
     place: function (i, v) { var n = nodes[i]; n.pos = new vec3(v.x, v.y, v.z); n.vel = vec3.zero(); n.tr.setLocalPosition(n.pos); if (pendingPlace === n) { pendingPlace = null; } },
@@ -1941,7 +1987,7 @@ script.createEvent("UpdateEvent").bind(function (e) {
     pm("overlaps"); if (state === "live") { checkCollisions(); }
     updatePulses(dt);
     updateCause(realDt);
-    pm("pulses"); updateRewrite(realDt); updateSparkles(realDt); pm("sparkles"); updateAmbient(realDt); pm("ambient"); updateVfx(); updateModelLife(realDt); pm("life"); updatePools(realDt);
+    pm("pulses"); updateRewrite(realDt); updateSparkles(realDt); pm("sparkles"); updateAmbient(realDt); pm("ambient"); updateVfx(); updateModelLife(realDt); pm("life"); updatePools(realDt); updateMagic(realDt);
     updateImagine(dt);
     updateSelection(); updateRealVisuals();
     hintObj.enabled = !!pendingPlace && !goalEnabled;

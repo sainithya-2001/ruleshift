@@ -1009,6 +1009,7 @@ if (script.runTests) {
         var d1 = rn[1].pos.distance(rn[2].pos);
         check("25 story: the cat flees from the lantern", d1 > d0 + 5, d0.toFixed(0) + " -> " + d1.toFixed(0));
         check("25 room physics stays inside the volume and never overlaps", violations.bounds === 0 && violations.overlap === 0, "bounds " + violations.bounds + " overlap " + violations.overlap);
+        check("25 ambient magic (fireflies, air motes, sparkles, beam trails) stays within its hard caps and inside the view", T.magicCount() <= T.magicMax && T.ambientCount() <= T.ambientMax, "magic " + T.magicCount() + "/" + T.magicMax + " sparkles " + T.ambientCount() + "/" + T.ambientMax);
         T.openEditor(conns[1]); yield 0.3; var dR0 = rn[1].pos.distance(rn[2].pos), okA = api.applyEditorRule("ATTRACT"); yield 4; var dR1 = rn[1].pos.distance(rn[2].pos);
         check("25 story: switching cat-lantern back to Attract brings the cat clearly back toward the lantern", okA && conns[1].rule === "ATTRACT" && dR1 < dR0 - 8, dR0.toFixed(0) + " -> " + dR1.toFixed(0));
 
