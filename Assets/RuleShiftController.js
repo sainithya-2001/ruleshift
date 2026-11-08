@@ -510,7 +510,11 @@ script.api.chooseReal = function (name) {   // a list entry picked (anything els
 
 // ---------- links ----------
 var HALO_SCALE = 1.7;
-function setBeamColor(c, col) { if (c.segs) { for (var i = 0; i < c.segs.length; i++) { c.segs[i].rmv.mainPass.baseColor = col; } } }
+function setBeamColor(c, col) {
+    if (c.segs) { for (var i = 0; i < c.segs.length; i++) { c.segs[i].rmv.mainPass.baseColor = col; } }
+    if (c.halo) { var hc = new vec4(col.r * HALO_A, col.g * HALO_A, col.b * HALO_A, HALO_A); for (var h = 0; h < c.halo.length; h++) { c.halo[h].rmv.mainPass.baseColor = hc; } }   // wide soft halo in the rule colour
+}
+var HALO_A = 0.34, HALO_N = 8, CORE_N = 8, BEAM_TRAIL = 4;
 function applyColor(c) { if (c.segs) { setBeamColor(c, RULE_COLOR[c.rule]); } }
 // A connection is a thin curved beam: BEAM_SEGS additive cylinder segments along a gentle arc, plus BEAM_MOTES small lights flowing source -> target.
 var BEAM_SEGS = 8, BEAM_MOTES = 3, BEAM_FLOW = 0.32, fxT = 0;
@@ -533,6 +537,29 @@ function makeBeam(c, mesh, mat) {
         mv.mesh = SPHERE_MESH; mv.mainMaterial = SPHERE_MAT.clone();
         mv.mainPass.blendMode = BlendMode.Add; mv.mainPass.depthWrite = false; mv.setRenderOrder(5);
         c.motes.push({ o: mo, tr: mo.getTransform(), pass: mv.mainPass });
+    }
+    c.halo = []; c.core = []; c.trail = [];
+    for (var hi = 0; hi < HALO_N; hi++) {   // soft halo: wider, translucent, drawn under the body
+        var ho = global.scene.createSceneObject("Beam Halo"); ho.setParent(root); ho.layer = root.layer;
+        var hv = ho.createComponent("Component.RenderMeshVisual");
+        hv.mesh = mesh; hv.mainMaterial = mat.clone();
+        hv.mainPass.blendMode = BlendMode.Add; hv.mainPass.depthWrite = false; hv.setRenderOrder(3);
+        c.halo.push({ o: ho, tr: ho.getTransform(), rmv: hv });
+    }
+    for (var ci = 0; ci < CORE_N; ci++) {   // bright white core on top of the body
+        var co = global.scene.createSceneObject("Beam Core"); co.setParent(root); co.layer = root.layer;
+        var cv = co.createComponent("Component.RenderMeshVisual");
+        cv.mesh = mesh; cv.mainMaterial = mat.clone();
+        cv.mainPass.blendMode = BlendMode.Add; cv.mainPass.depthWrite = false; cv.setRenderOrder(4);
+        cv.mainPass.baseColor = new vec4(1, 1, 1, 1);
+        c.core.push({ o: co, tr: co.getTransform(), rmv: cv });
+    }
+    for (var ti = 0; ti < BEAM_TRAIL; ti++) {   // faint sparkles drifting off the beam
+        var to = global.scene.createSceneObject("Beam Trail"); to.setParent(root); to.layer = root.layer;
+        var tv = to.createComponent("Component.RenderMeshVisual");
+        tv.mesh = SPHERE_MESH; tv.mainMaterial = SPHERE_MAT.clone();
+        tv.mainPass.blendMode = BlendMode.Add; tv.mainPass.depthWrite = false; tv.mainPass.depthTest = false; tv.setRenderOrder(5);
+        c.trail.push({ o: to, tr: to.getTransform(), pass: tv.mainPass, age: ti * 0.4, life: 1.4, u: 0.5, side: 1, size: 0.5 });
     }
     c.rmv = c.segs[0].rmv;
     c.mCenter = new vec3((mesh.aabbMax.x + mesh.aabbMin.x) / 2, (mesh.aabbMax.y + mesh.aabbMin.y) / 2, (mesh.aabbMax.z + mesh.aabbMin.z) / 2);
@@ -1142,25 +1169,40 @@ function updateVisual(c) {
     var perp = new vec3(-dir.y, dir.x, 0), h = Math.min(0.12 * dist, 4 * K) * c.arcAmt;
     var mid = A.add(B).uniformScale(0.5), C = mid.add(perp.uniformScale(2 * h));
     c.arcC = C;
-    var prev = A;
-    for (var i = 0; i < BEAM_SEGS; i++) {
-        var nx = beamPoint(A, C, B, (i + 1) / BEAM_SEGS), seg = c.segs[i];
-        var d = nx.sub(prev), len = Math.max(d.length, 0.001);
-        var rot = quat.rotationFromTo(UP, d.uniformScale(1 / len));
-        var sx = w / c.mW, sy = len * 1.0 / c.mL, sz = w / c.mD;
-        var mp = prev.add(nx).uniformScale(0.5);
-        seg.tr.setWorldRotation(rot);
-        seg.tr.setLocalScale(new vec3(sx, sy, sz));
-        seg.tr.setWorldPosition(mp.sub(rot.multiplyVec3(new vec3(c.mCenter.x * sx, c.mCenter.y * sy, c.mCenter.z * sz))));
-        prev = nx;
+    var amp = Math.min(0.55 * K, 0.022 * dist);   // gentle travelling wave along the arc, pinned at both ends
+    function wp(u) { var q = beamPoint(A, C, B, u), sw = amp * Math.sin(Math.PI * u) * Math.sin(6.2832 * (1.0 * u - fxT * 0.4)); return new vec3(q.x + perp.x * sw, q.y + perp.y * sw, q.z); }
+    function layer(list, N, wm) {
+        var prev = A, sw = w * wm;
+        for (var i = 0; i < N; i++) {
+            var nx = wp((i + 1) / N), seg = list[i];
+            var d = nx.sub(prev), len = Math.max(d.length, 0.001);
+            var rot = quat.rotationFromTo(UP, d.uniformScale(1 / len));
+            var sx = sw / c.mW, sy = len / c.mL, sz = sw / c.mD;
+            var mp = prev.add(nx).uniformScale(0.5);
+            seg.tr.setWorldRotation(rot);
+            seg.tr.setLocalScale(new vec3(sx, sy, sz));
+            seg.tr.setWorldPosition(mp.sub(rot.multiplyVec3(new vec3(c.mCenter.x * sx, c.mCenter.y * sy, c.mCenter.z * sz))));
+            prev = nx;
+        }
     }
+    layer(c.segs, BEAM_SEGS, 1.1); layer(c.halo, HALO_N, 2.9); layer(c.core, CORE_N, 0.4);
     var mcol = lerp4(col, WHITE4, 0.55);   // motes: bright cores in the rule colour
     for (var m = 0; m < BEAM_MOTES; m++) {
         var u = (fxT * BEAM_FLOW + m / BEAM_MOTES + (c.beamPhase || 0)) % 1, mo = c.motes[m];
-        mo.tr.setWorldPosition(beamPoint(A, C, B, u).add(new vec3(0, 0, 0.3 * K)));
+        mo.tr.setWorldPosition(wp(u).add(new vec3(0, 0, 0.3 * K)));
         var fade = Math.sin(Math.PI * u);
         mo.tr.setLocalScale(vec3.one().uniformScale(w * 2.6 * (0.6 + 0.4 * fade) / SPHERE_D));
         mo.pass.baseColor = new vec4(mcol.r * fade, mcol.g * fade, mcol.b * fade, fade);
+    }
+    var vwT = script.api.view(), limTx = vwT.halfW / -WORLD_Z * 0.9, limTy = vwT.halfH / -WORLD_Z * 0.9, tcol = lerp4(col, WHITE4, 0.45);
+    for (var ts = 0; ts < c.trail.length; ts++) {   // sparkle trail: born on the beam, drifts sideways and up, fades; never shown near the view edge
+        var T = c.trail[ts]; T.age += lastDt;
+        if (T.age >= T.life) { T.age = 0; T.life = 1.0 + 0.8 * ambRand(); T.u = 0.1 + 0.8 * ambRand(); T.side = ambRand() < 0.5 ? -1 : 1; T.size = 0.4 + 0.4 * ambRand(); }
+        var tu = T.age / T.life, tp = wp(T.u), off = (0.6 + 2.2 * tu) * K * T.side, tq = new vec3(tp.x + perp.x * off, tp.y + perp.y * off + 1.6 * K * tu, tp.z + 0.4 * K), tdp = Math.max(-tq.z, 1);
+        var ta = (Math.abs(tq.x / tdp) > limTx || Math.abs(tq.y / tdp) > limTy) ? 0 : Math.sin(Math.PI * tu) * 0.7;
+        T.tr.setWorldPosition(tq);
+        T.tr.setLocalScale(vec3.one().uniformScale(T.size * K * (1 - 0.4 * tu) / SPHERE_D));
+        T.pass.baseColor = new vec4(tcol.r * ta, tcol.g * ta, tcol.b * ta, ta);
     }
     if (c.collider) {   // wide invisible tap target, shorter than the span so objects stay grabbable
         var sh = c.collider.shape;
