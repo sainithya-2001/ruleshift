@@ -1835,6 +1835,50 @@ script.api.makePlate = function (name, w, h, d, pos, col, order, solid) {
     t.setWorldPosition(pos);
     return o;
 };
+// Glassy UI helpers: rounded rectangles (filled or as a thin frame), and small flat rule icons. Meshes are built in cm (the object is not scaled), cached by size.
+var roundCache = {};
+function rrPts(w, h, r, seg) {
+    r = Math.max(0.02, Math.min(r, w / 2 - 0.01, h / 2 - 0.01)); var pts = [], cs = [[1, 1, 0], [-1, 1, 90], [-1, -1, 180], [1, -1, 270]];
+    cs.forEach(function (c) { for (var i = 0; i <= seg; i++) { var a = (c[2] + 90 * i / seg) * Math.PI / 180; pts.push([c[0] * (w / 2 - r) + Math.cos(a) * r, c[1] * (h / 2 - r) + Math.sin(a) * r, 0]); } });
+    return pts;
+}
+function roundMesh(w, h, r, ringT) {
+    var key = [w.toFixed(3), h.toFixed(3), r.toFixed(3), ringT || 0].join("_");
+    if (roundCache[key]) { return roundCache[key]; }
+    var tris = [], o = rrPts(w, h, r, 6), n = o.length, i, j;
+    if (!ringT) { for (i = 0; i < n; i++) { j = (i + 1) % n; tris.push([[0, 0, 0], o[i], o[j]], [[0, 0, 0], o[j], o[i]]); } }
+    else {
+        var q = rrPts(Math.max(w - 2 * ringT, 0.05), Math.max(h - 2 * ringT, 0.05), Math.max(r - ringT, 0.05), 6);
+        for (i = 0; i < n; i++) { j = (i + 1) % n; tris.push([o[i], o[j], q[j]], [o[i], q[j], q[i]], [o[i], q[j], o[j]], [o[i], q[i], q[j]]); }
+    }
+    return (roundCache[key] = buildMesh(tris));
+}
+// name, size w x h (cm), corner radius, position (world, or local when parent is given), colour, render order, additive?, parent, frame thickness (0 = filled)
+script.api.makeRound = function (name, w, h, r, pos, col, order, add, parent, ringT) {
+    var o = global.scene.createSceneObject(name);
+    if (parent) { o.setParent(parent); o.getTransform().setLocalPosition(pos); } else { o.getTransform().setWorldPosition(pos); }
+    var v = o.createComponent("Component.RenderMeshVisual");
+    v.mesh = roundMesh(w, h, r, ringT || 0); v.mainMaterial = SPHERE_MAT.clone(); v.mainPass.baseColor = col;
+    v.mainPass.blendMode = add ? BlendMode.Add : BlendMode.Normal; v.mainPass.depthWrite = false; v.mainPass.depthTest = false; v.setRenderOrder(order);
+    return o;
+};
+script.api.makeRuleIcon = function (rule, size, col, parent, order) {   // a small flat white glyph per rule, unit box scaled by size
+    var T = [], k, a;
+    function fan(pts) { for (var i = 0; i < pts.length; i++) { var j = (i + 1) % pts.length; T.push([[0, 0, 0], pts[i], pts[j]], [[0, 0, 0], pts[j], pts[i]]); } }
+    function tri3(a, b, c) { T.push([a, b, c], [a, c, b]); }
+    if (rule === "ATTRACT") { tri3([-0.46, -0.24, 0], [-0.46, 0.24, 0], [-0.04, 0, 0]); tri3([0.46, -0.24, 0], [0.46, 0.24, 0], [0.04, 0, 0]); }
+    else if (rule === "REPEL") { tri3([-0.04, -0.24, 0], [-0.04, 0.24, 0], [-0.46, 0, 0]); tri3([0.04, -0.24, 0], [0.04, 0.24, 0], [0.46, 0, 0]); }
+    else if (rule === "COLLISION_TRIGGER") { var st = []; for (k = 0; k < 8; k++) { a = k * Math.PI / 4; var rr = k % 2 === 0 ? 0.48 : 0.15; st.push([Math.cos(a) * rr, Math.sin(a) * rr, 0]); } fan(st); }
+    else if (rule === "TRANSFER") { tri3([-0.46, -0.1, 0], [0.04, -0.1, 0], [0.04, 0.1, 0]); tri3([-0.46, -0.1, 0], [0.04, 0.1, 0], [-0.46, 0.1, 0]); tri3([0.04, -0.3, 0], [0.04, 0.3, 0], [0.48, 0, 0]); }
+    else { var dsk = []; for (k = 0; k < 16; k++) { a = k * Math.PI / 8; dsk.push([Math.cos(a) * 0.14, Math.sin(a) * 0.14, 0]); } fan(dsk); for (k = 0; k < 20; k++) { var a0 = k * Math.PI / 10, a1 = (k + 1) * Math.PI / 10; var A0 = [Math.cos(a0) * 0.3, Math.sin(a0) * 0.3, 0], B0 = [Math.cos(a0) * 0.46, Math.sin(a0) * 0.46, 0], A1 = [Math.cos(a1) * 0.3, Math.sin(a1) * 0.3, 0], B1 = [Math.cos(a1) * 0.46, Math.sin(a1) * 0.46, 0]; T.push([A0, B0, B1], [A0, B1, B0], [A0, B1, A1], [A0, A1, B1]); } }
+    var o = global.scene.createSceneObject("Rule Icon " + rule);
+    if (parent) { o.setParent(parent); o.getTransform().setLocalPosition(vec3.zero()); }
+    var v = o.createComponent("Component.RenderMeshVisual");
+    v.mesh = buildMesh(T); v.mainMaterial = SPHERE_MAT.clone(); v.mainPass.baseColor = col;
+    v.mainPass.blendMode = BlendMode.Normal; v.mainPass.depthWrite = false; v.mainPass.depthTest = false; v.setRenderOrder(order);
+    o.getTransform().setLocalScale(vec3.one().uniformScale(size));
+    return o;
+};
 script.api.makeSwatch = function (parent, col, size, z) {
     var o = global.scene.createSceneObject("Swatch");
     o.setParent(parent);

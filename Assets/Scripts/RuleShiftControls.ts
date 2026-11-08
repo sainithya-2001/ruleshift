@@ -35,6 +35,9 @@ const TB_PILL = new vec4(0.12, 0.3, 0.8, 0.88) // toolbar pills: lower opacity s
 const TB_DARK = new vec4(0.12, 0.14, 0.27, 0.0)
 const TOOLBAR_RIGHT_ANG = 0.2286 // the toolbar ends here (angular): just left of the Sunlit Room sideboard's right speaker, so no pill sits over it
 const ACCENT = new vec4(0.1, 0.55, 1.0, 1)
+const GLASS = new vec4(0.06, 0.04, 0.16, 0.86) // dark translucent glass: the toolbar bar and the rule panel
+const GLASS_ROW = new vec4(0.13, 0.1, 0.29, 0.92) // a rule row on the glass card
+const GLOW = new vec4(0.62, 0.38, 1.0, 1) // soft purple outline glow
 const ARMED = new vec4(0.35, 0.92, 1.0, 1) // Connect armed: a bright cyan fill, clearly different from the blue pills
 
 type Pill = {button: Button; content: ElementContent}
@@ -88,7 +91,7 @@ export class RuleShiftControls extends BaseScriptComponent {
   private halfH = 27
   private editorRoot: SceneObject
   private editorBgs: SceneObject[] = []
-  private editorRows: {rule: string; name: string; pill: Pill; fill: SceneObject; border: SceneObject; color: number[]}[] = []
+  private editorRows: {rule: string; name: string; pill: Pill; fill: SceneObject; border: SceneObject; back: SceneObject; icon: SceneObject; color: number[]}[] = []
   private editorShown = false
   private editorTextFit = 0
   private cardRoot: SceneObject
@@ -210,8 +213,11 @@ export class RuleShiftControls extends BaseScriptComponent {
     this.toolbarRoot = global.scene.createSceneObject("Toolbar Root")
     const plateH = h + 1.0 + statusH
     const plateY = y + statusH / 2
-    const plate = api.makePlate("Toolbar Strip", total + 1.4, plateH, 0.4, new vec3(x0 + total / 2, plateY, Z - 1.2), TB_DARK, -8)
+    // one dark translucent rounded bar with a soft purple glow outline (the pills sit on it as plain white icons and words)
+    const barPos = new vec3(x0 + total / 2, plateY, Z - 1.2)
+    const plate = api.makeRound("Toolbar Strip", total + 1.4, plateH, 1.8, barPos, GLASS, -8, false, null, 0)
     plate.setParent(this.toolbarRoot)
+    this.glowFrame(total + 1.4, plateH, 1.8, barPos, -7, this.toolbarRoot)
     this.toolbarPlateTop = plateY + plateH / 2
     api.setToolbarRect((x0 - 0.7) / (-Z + 1.2), (x0 + total + 0.7) / (-Z + 1.2)) // the toolbar plate's left and right edges: objects and beams keep out of it
     api.setToolbarTop(this.toolbarPlateTop / (-Z + 1.2)) // top edge of the toolbar in angular space (room mode also keeps panels above the sideboard line)
@@ -219,8 +225,10 @@ export class RuleShiftControls extends BaseScriptComponent {
     const pills: Pill[] = []
     defs.forEach((d, i) => {
       const cx = x + pw / 2
-      const pl = api.makePlate("Pill " + d.label, pw, h, 0.4, new vec3(cx, y, Z - 0.8), TB_PILL, -7)
-      pl.setParent(this.toolbarRoot)
+      if (i > 0) { // a faint divider between the buttons
+        const dv = api.makeRound("Divider " + i, 0.1, h * 0.62, 0.05, new vec3(x - gap / 2, y, Z - 0.8), new vec4(0.6 * 0.35, 0.45 * 0.35, 1 * 0.35, 0.35), -6, true, null, 0)
+        dv.setParent(this.toolbarRoot)
+      }
       pills.push(this.makePill(this.toolbarRoot, "Pill" + i, d.label, d.icon, new vec3(cx, y, Z + 0.5), new vec2(pw, h), TOOLBAR_TEXT_PROBE, false, 1.9, d.icon !== null))
       this.toolbarLabels.push(d.label)
       this.toolbarCenters.push(cx)
@@ -237,6 +245,17 @@ export class RuleShiftControls extends BaseScriptComponent {
       this.controller.api.toggle()
     })
     pills[2].button.onTriggerUp.add(() => this.toggleMenu("more"))
+  }
+
+  // a soft glow outline around a rounded rectangle: a bright thin line plus two wider, fainter frames (additive)
+  private glowFrame(w: number, h: number, r: number, pos: vec3, order: number, parent: SceneObject | null, col = GLOW): SceneObject[] {
+    const api = this.controller.api
+    const layers = [[0, 0.14, 0.95], [0.3, 0.5, 0.3], [0.7, 0.9, 0.13]] // grow outward, thickness, brightness
+    return layers.map((L) => {
+      const o = api.makeRound("Glow Frame", w + 2 * L[0], h + 2 * L[0], r + L[0], pos, new vec4(col.r * L[2], col.g * L[2], col.b * L[2], L[2]), order, true, null, L[1])
+      if (parent) o.setParent(parent)
+      return o
+    })
   }
 
   // outlined label (bright rooms): a bright fill with a dark outline stays readable on any background
@@ -1011,17 +1030,31 @@ export class RuleShiftControls extends BaseScriptComponent {
     const api = this.controller.api
     const E = api.editorSpec
     this.editorRoot = global.scene.createSceneObject("Rule Editor")
-    E.layouts.forEach((L: any, li: number) => this.editorBgs.push(api.makePlate("Rule Editor Plate " + li, L.w, L.h, 0.4, new vec3(0, 0, Z), DARK, -8)))
+    E.layouts.forEach((L: any, li: number) => {
+      // dark glass card with a soft purple glow outline (one parent per layout so the plate and its glow move together)
+      const holder = global.scene.createSceneObject("Rule Editor Plate " + li)
+      holder.getTransform().setWorldPosition(new vec3(0, 0, Z))
+      api.makeRound("Card Glass", L.w, L.h, 1.4, vec3.zero(), GLASS, -8, false, holder, 0)
+      this.glowFrame(L.w, L.h, 1.4, vec3.zero(), -7, holder).forEach((g) => g.getTransform().setLocalPosition(vec3.zero()))
+      this.editorBgs.push(holder)
+    })
     const rules = api.editorRules()
     rules.forEach((r: any, i: number) => {
-      const border = api.makePlate("Rule Border " + r.rule, E.pillW + 0.5, E.pillH + 0.5, 0.2, new vec3(0, 0, Z), WHITE, -6)
-      const fill = api.makePlate("Rule Fill " + r.rule, E.pillW, E.pillH, 0.2, new vec3(0, 0, Z), PILL, -5)
-      const pill = this.makePill(this.editorRoot, "Rule" + i, r.name, null, new vec3(0, 0, 0.5), new vec2(E.pillW, E.pillH), 38, true) // 38: even "✓ Collision Trigger" stays inside the 8 cm pill (at 42 the longest label with its check mark ran to the pill edge)
+      const col = new vec4(r.color[0], r.color[1], r.color[2], 1)
+      const back = api.makeRound("Rule Row " + r.rule, E.pillW, E.pillH, 0.9, new vec3(0, 0, Z), GLASS_ROW, -6, false, null, 0)
+      // the current rule: a bright outline in its own colour around the row
+      const border = api.makeRound("Rule Border " + r.rule, E.pillW + 0.2, E.pillH + 0.2, 1.0, new vec3(0, 0, Z), new vec4(col.r, col.g, col.b, 1), -5, false, null, 0.16)
+      // a coloured icon chip per rule (round, in the rule colour) carrying a small white glyph
+      const chip = E.pillH * 0.66
+      const fill = api.makeRound("Rule Fill " + r.rule, chip, chip, chip / 2, new vec3(0, 0, Z), col, -5, false, null, 0)
+      const icon = api.makeRuleIcon(r.rule, chip * 0.74, WHITE, fill, -4)
+      const pill = this.makePill(this.editorRoot, "Rule" + i, r.name, null, new vec3(0, 0, 0.5), new vec2(E.pillW, E.pillH), 30, true) // 38: even "✓ Collision Trigger" stays inside the 8 cm pill (at 42 the longest label with its check mark ran to the pill edge)
+      ;(pill.content as any).padding = {top: 0.2, right: 0.3, bottom: 0.2, left: chip + 0.9} // the words sit to the right of the icon chip
       pill.button.onTriggerUp.add(() => this.controller.api.applyEditorRule(r.rule))
       pill.button.onInitialized.add(() => {
         pill.button.opacity = 0 // the Button's own grey plate would cover the rule colours drawn behind it
       })
-      this.editorRows.push({rule: r.rule, name: r.name, pill, fill, border, color: r.color})
+      this.editorRows.push({rule: r.rule, name: r.name, pill, fill, border, back, icon, color: r.color})
     })
     this.setEditorShown(false)
     api.test.editorPills = () => this.editorRows.map((row) => ({rule: row.rule, selected: row.border.enabled, fill: this.fillColor(row)}))
@@ -1043,6 +1076,7 @@ export class RuleShiftControls extends BaseScriptComponent {
     this.editorBgs.forEach((b) => (b.enabled = on))
     this.editorRows.forEach((r) => {
       r.fill.enabled = on
+      r.back.enabled = on
       r.border.enabled = on && r.border.enabled
     })
   }
@@ -1085,7 +1119,9 @@ export class RuleShiftControls extends BaseScriptComponent {
       const sel = row.rule === info.rule
       row.pill.content.text = (sel ? "✓ " : "") + row.name // the current rule is marked
       const k = sel ? 1.0 : 0.72 // the current rule is bright and outlined; the others are dimmed versions of their colours
-      row.fill.getTransform().setWorldPosition(new vec3(c.x + lx, c.y + ly, c.z - 0.6))
+      const chipX = lx - E.pillW / 2 + E.pillH * 0.5
+      row.back.getTransform().setWorldPosition(new vec3(c.x + lx, c.y + ly, c.z - 0.5))
+      row.fill.getTransform().setWorldPosition(new vec3(c.x + chipX, c.y + ly, c.z - 0.6))
       row.border.getTransform().setWorldPosition(new vec3(c.x + lx, c.y + ly, c.z - 0.9))
       row.border.enabled = sel
       row.fill.getComponent("Component.RenderMeshVisual").mainPass.baseColor = new vec4(row.color[0] * k, row.color[1] * k, row.color[2] * k, 1)
