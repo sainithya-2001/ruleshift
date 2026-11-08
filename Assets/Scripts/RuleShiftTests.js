@@ -990,7 +990,7 @@ if (script.runTests) {
         check("25 everything is visible from the default camera, down to the sideboard (angular extents)", rn.every(function (n) { var dp = -n.pos.z; return Math.abs(n.pos.x) + n.radius <= tx * dp + 0.01 && n.pos.y + n.radius <= ty * dp + 0.01 && n.pos.y - n.radius >= -ty * dp - 0.01 && n.pos.y - n.radius >= api.floorY - 0.01; }), "tan x " + tx.toFixed(3) + " tan y " + ty.toFixed(3) + " floor " + api.floorY);
         check("25 all objects are inside the room volume", rn.every(function (n) { return Math.abs(n.pos.x) <= rb.x + 0.01 && n.pos.y >= rb.yMin - 0.01 && n.pos.y <= rb.yMax + 0.01 && n.pos.z <= rb.zNear + 0.01 && n.pos.z >= rb.zFar - 0.01; }));
         var rFloor = rn.filter(function (n) { return n.obj.name === "Cat" || n.obj.name === "Flower"; });
-        check("25 the cat and the flower rest on the table (the floor of the play volume)", rFloor.length === 2 && rFloor.every(function (n) { return Math.abs(n.pos.y - n.radius - api.floorY) < 0.6; }), rFloor.map(function (n) { return (n.pos.y - n.radius).toFixed(1); }).join());
+        check("25 the flower rests on the table (the floor of the play volume) and the cat starts within 12 cm above it (clear of the real turntable)", rFloor.length === 2 && rFloor.every(function (n) { var h = n.pos.y - n.radius - api.floorY; return n.obj.name === "Cat" ? (h > -0.6 && h < 12) : Math.abs(h) < 0.6; }), rFloor.map(function (n) { return (n.pos.y - n.radius).toFixed(1); }).join());
         var ys = rn.map(function (n) { return n.pos.y; }).sort(function (a, b) { return a - b; }), hs = 1;
         for (var yi = 1; yi < ys.length; yi++) { if (ys[yi] - ys[yi - 1] > 10) { hs++; } }
         check("25 objects live at different heights (floor, table height, above)", hs >= 3, "bands " + hs);
@@ -1037,7 +1037,7 @@ if (script.runTests) {
         api.reset(); yield 0.3; api.clearAll(); api.loadRoom(); yield 0.8;
         var vw27 = api.view(), n27 = nodes.slice(), cat27 = 1, lan27 = 2, flo27 = 3, hom27 = 0;
         check("27 the floor of the room is the sideboard top (the thin strip at the bottom of the default view)", api.floorY / 125 < -0.277 && api.floorY / 125 > -vw27.halfH / 95, "angular " + (api.floorY / 125).toFixed(3));
-        check("27 the cat and the flower visibly stand on the surface (model feet within 1 cm of it)", [cat27, flo27].every(function (i) { var b = T.visualBottom(i); return b !== null && Math.abs(b - api.floorY) < 1.0; }), [cat27, flo27].map(function (i) { return (T.visualBottom(i) - api.floorY).toFixed(2); }).join());
+        check("27 the flower visibly stands on the surface (within 1 cm) and the cat hovers just above it (under 12 cm)", [cat27, flo27].every(function (i) { var b = T.visualBottom(i); return b !== null && (i === cat27 ? (b - api.floorY > -1.0 && b - api.floorY < 12) : Math.abs(b - api.floorY) < 1.0); }), [cat27, flo27].map(function (i) { return (T.visualBottom(i) - api.floorY).toFixed(2); }).join());
         check("27 the lantern floats above the sideboard and the island house floats higher, on the left", n27[lan27].pos.y - n27[lan27].radius > api.floorY + 15 && n27[hom27].pos.y > n27[lan27].pos.y && n27[hom27].pos.x < 0, "lantern y " + n27[lan27].pos.y.toFixed(0) + " house y " + n27[hom27].pos.y.toFixed(0));
         var tfin = ctl.toolbarFit(), tbLeft = (tfin.centers[0] - tfin.pillWidth / 2) / 95 * 125;
         check("27 the toolbar sits low in the right corner, clear of the cat and the flower", tbLeft > n27[flo27].pos.x + 6 && tbLeft > n27[cat27].pos.x + 20, "toolbar left at 1.25 m: " + tbLeft.toFixed(1) + " cm, flower x " + n27[flo27].pos.x.toFixed(1));
@@ -1147,7 +1147,9 @@ if (script.runTests) {
         T.realPinchRay(O29, D29); yield 5;
         check("29 still waiting after 5 s: 'Looking...' stays", api.realMenuInfo() && api.realMenuInfo().looking === true);
         yield 4;
-        check("29 after 8 s without an answer the list appears", api.realMenuInfo() && api.realMenuInfo().looking === false && T.realMenuInfo().shown === true);
+        check("29 still waiting after 9 s: 'Looking...' stays", api.realMenuInfo() && api.realMenuInfo().looking === true);
+        yield 4;
+        check("29 after 12 s without an answer the list appears", api.realMenuInfo() && api.realMenuInfo().looking === false && T.realMenuInfo().shown === true);
         pend29("Chair", { why: "late", ms: 9000 }); yield 0.3;
         check("29 a late answer after the list appeared is ignored", nodes.filter(function (n) { return n.real; }).length === 0);
         api.closeRealMenu(); yield 0.2;
@@ -1155,6 +1157,36 @@ if (script.runTests) {
         check("29 an answer arriving after the pinch was cancelled creates nothing", nodes.filter(function (n) { return n.real; }).length === 0 && api.realMenuInfo() === null);
         api.setVisionProvider(null);
         T.setWorldScale(1); api.clearAll();
+
+        // 30. Final visual fixes: the toolbar is a no-go zone for objects and beams, generated objects appear at hero size in a free spot, the cat starts clear of the turntable
+        T.setWorldScale(T.ROOM_K); api.reset(); yield 0.3; api.clearAll(); api.loadRoom(); yield 0.8;
+        var tb30 = api.toolbarBox(), cat30 = 1, lan30 = 2, flo30 = 3;
+        check("30 the toolbar rectangle is known to the controller", !!tb30 && tb30.x1 > tb30.x0 && tb30.top > -0.4 && tb30.top < -0.15, JSON.stringify(tb30));
+        T.place(flo30, new vec3(8, -28, -125)); api.toggle(); yield 0.6;
+        var f30 = nodes[flo30], fd30 = Math.max(-f30.pos.z, 1), fr30 = f30.radius * 0.8 / fd30;
+        check("30 an object placed into the toolbar area is moved out of it", !(f30.pos.x / fd30 + fr30 > tb30.x0 + 0.003 && f30.pos.x / fd30 - fr30 < tb30.x1 && f30.pos.y / fd30 - fr30 < tb30.top - 0.003), f30.pos.x.toFixed(1) + "," + f30.pos.y.toFixed(1));
+        api.toggle(); api.reset(); yield 0.3;
+        // the story: lantern into the lotus, then neither the lotus nor any beam sits under the toolbar
+        api.toggle(); yield 4;
+        var ln30 = nodes[lan30]; T.pressStart(lan30); for (var k30 = 1; k30 <= 10; k30++) { ln30.tr.setLocalPosition(new vec3(ln30.pos.x + (f30.pos.x - ln30.pos.x) * 0.5, ln30.pos.y + (f30.pos.y + ln30.radius + f30.radius - 0.5 - ln30.pos.y) * 0.5, ln30.pos.z)); yield 0.1; } T.pressEnd(lan30, true); yield 16;
+        var bad30 = 0, bn30 = "";
+        conns.forEach(function (c) { if (!c.active) { return; } var A = c.A.pos, B = c.B.pos, C = c.arcC || A.add(B).uniformScale(0.5); for (var u = 0.1; u < 0.95; u += 0.1) { var a = (1 - u) * (1 - u), b = 2 * u * (1 - u), d = u * u, qx = A.x * a + C.x * b + B.x * d, qy = A.y * a + C.y * b + B.y * d, qz = A.z * a + C.z * b + B.z * d, qd = Math.max(-qz, 1); if (qx / qd > tb30.x0 && qx / qd < tb30.x1 && qy / qd < tb30.top) { bad30++; bn30 = c.A.obj.name + "-" + c.B.obj.name; } } });
+        var oo30 = nodes.filter(function (n) { var d = Math.max(-n.pos.z, 1), r = n.radius * 0.8 / d; return n.pos.x / d + r > tb30.x0 + 0.003 && n.pos.x / d - r < tb30.x1 && n.pos.y / d - r < tb30.top - 0.003; }).length;
+        check("30 after the collision no object overlaps the toolbar", oo30 === 0, oo30 + " objects, lotus " + nodes[flo30].pos.x.toFixed(1) + "," + nodes[flo30].pos.y.toFixed(1));
+        check("30 no beam runs under the toolbar plate", bad30 === 0, bad30 + " samples " + bn30);
+        api.toggle(); api.reset(); yield 0.3;
+        // the cat starts clear of the real turntable
+        var tt30 = new vec3(-27.6, -37.2, -125);
+        check("30 the cat starts clearly separate from the turntable's ring (at least 2 cm of air)", nodes[cat30].pos.distance(tt30) >= nodes[cat30].radius + 7.5 + 2, nodes[cat30].pos.distance(tt30).toFixed(1));
+        // Surprise: hero size in a free spot
+        var n30 = nodes.length, im30 = api.imagine("a glowing alien flower"); yield 0.5;
+        var g30 = nodes[im30], gd30 = Math.max(-g30.pos.z, 1), gr30 = g30.radius * 0.85 / gd30, clr30 = true, near30 = "";
+        nodes.forEach(function (o) { if (o !== g30) { var od = Math.max(-o.pos.z, 1), dx = o.pos.x / od - g30.pos.x / gd30, dy = o.pos.y / od - g30.pos.y / gd30, rr = o.radius * 0.85 / od + gr30; if (dx * dx + dy * dy < rr * rr) { clr30 = false; near30 += o.obj.name + " "; } } });
+        var tbOverlap30 = g30.pos.x / gd30 + gr30 > tb30.x0 && g30.pos.x / gd30 - gr30 < tb30.x1 && g30.pos.y / gd30 - gr30 < tb30.top;
+        check("30 a new generated object appears clear of the other objects and the toolbar", nodes.length === n30 + 1 && clr30 && !tbOverlap30, near30 + " at " + g30.pos.x.toFixed(1) + "," + g30.pos.y.toFixed(1));
+        check("30 and clear of every beam", (function () { var hit = 0; conns.forEach(function (c) { if (!c.active) { return; } var A = c.A.pos, B = c.B.pos, C = c.arcC || A.add(B).uniformScale(0.5); for (var u = 0.05; u < 1; u += 0.1) { var a = (1 - u) * (1 - u), b = 2 * u * (1 - u), d = u * u, qd = Math.max(-(A.z * a + C.z * b + B.z * d), 1), dx = (A.x * a + C.x * b + B.x * d) / qd - g30.pos.x / gd30, dy = (A.y * a + C.y * b + B.y * d) / qd - g30.pos.y / gd30; if (dx * dx + dy * dy < gr30 * gr30) { hit++; } } }); return hit === 0; })());
+        api.clearAll(); T.setWorldScale(1); yield 0.3;
+
 
         api.reset();
         var pass =results.filter(function (r) { return r; }).length;

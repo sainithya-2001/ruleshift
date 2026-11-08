@@ -411,8 +411,8 @@ function openRealMenu(o, d) {   // a ray from the eye through the pinch: the poi
     if (wqSession) {
         try { wqSession.hitTest(o, o.add(d.uniformScale(400)), function (r) { if (realMenu === m && r && r.position) { m.pos = new vec3(r.position.x, r.position.y, r.position.z); wqStatus = "hits"; } }); } catch (e) { }
     }
-    if (visionProvider) {   // vision: name the object from a camera crop; the list only appears if that fails or takes over 8 s
-        m.looking = true; m.deadline = elapsed + 8;
+    if (visionProvider) {   // vision: name the object from a camera crop; the list only appears if that fails or takes over 12 s
+        m.looking = true; m.deadline = elapsed + VISION_LIMIT;
         visionProvider(m.ax, m.ay, function (name, info) {
             if (realMenu !== m || !m.looking) { return; }
             script.api.visionLast = info || null;
@@ -469,10 +469,11 @@ function spawnNamedReal(name, pos) {   // a name from vision: a known type keeps
     return spawnRealNode(name, size, pos);
 }
 var visionProvider = null;
+var VISION_LIMIT = 12;   // seconds the camera naming may take before the list appears
 script.api.setVisionProvider = function (f) { visionProvider = f; };
 script.api.getVisionProvider = function () { return visionProvider; };
 function updateRealVisuals() {
-    if (realMenu && realMenu.looking && elapsed > realMenu.deadline) { realMenu.looking = false; print("RULESHIFT vision timed out after 8 s: showing the list"); }
+    if (realMenu && realMenu.looking && elapsed > realMenu.deadline) { realMenu.looking = false; print("RULESHIFT vision timed out after " + VISION_LIMIT + " s: showing the list"); }
     for (var i = 0; i < nodes.length; i++) {
         var n = nodes[i];
         if (!n.real) { continue; }
@@ -917,11 +918,24 @@ function updateGoal(dt) {
 }
 var STAGE_R = 23;
 var BOX_X = 17, BOX_YMIN = -16, BOX_YMAX = 8, BOX_Z = 10;   // keeps objects above the buttons and inside the view
+var toolbarRect = null;   // the toolbar plate in angular space {x0, x1}; its top is toolbarTopAng
+script.api.setToolbarRect = function (x0, x1) { toolbarRect = { x0: x0, x1: x1 }; };
+function tbBox(m) { return (toolbarRect && roomMode() && toolbarTopAng > -1) ? { x0: toolbarRect.x0 - m, x1: toolbarRect.x1 + m, top: toolbarTopAng + m } : null; }
+script.api.toolbarBox = function () { return tbBox(0); };
 function clampToBox(n, p) {
     if (n.anchored) { return n.pos; }   // a real-object node never moves
     if (roomMode()) {   // the room volume: floor to ceiling, side to side, and from just in front of the user to the far wall (an object may rest on the floor)
         var r = n.radius;
-        return new vec3(Math.max(-(ROOM.x - r), Math.min(ROOM.x - r, p.x)), Math.max(FLOOR_Y + r, Math.min(ROOM.yMax - r, p.y)), Math.max(ROOM.zFar + r, Math.min(ROOM.zNear - r, p.z)));
+        var q = new vec3(Math.max(-(ROOM.x - r), Math.min(ROOM.x - r, p.x)), Math.max(FLOOR_Y + r, Math.min(ROOM.yMax - r, p.y)), Math.max(ROOM.zFar + r, Math.min(ROOM.zNear - r, p.z)));
+        var tb = tbBox(0.004);   // the toolbar is a no-go zone: an object whose disc would overlap it is moved out the short way (left or up)
+        if (tb) {
+            var dep = Math.max(-q.z, 1), rA = r * 0.8 / dep, ax = q.x / dep, ay = q.y / dep;
+            if (ax + rA > tb.x0 && ax - rA < tb.x1 && ay - rA < tb.top) {
+                var mL = ax + rA - tb.x0, mU = tb.top - (ay - rA);
+                if (mL <= mU) { q = new vec3(q.x - mL * dep, q.y, q.z); } else { q = new vec3(q.x, q.y + mU * dep, q.z); }
+            }
+        }
+        return q;
     }
     var lx = Math.min(BOX_X, STAGE_R - n.radius);   // big objects stop at the stage rim
     return new vec3(Math.max(-lx, Math.min(lx, p.x)),
@@ -1083,10 +1097,17 @@ function beamClip(c, amt, A, B, perp, dist) {   // how much a beam with this arc
             if (dd < nr) { pen += nr - dd; }
         }
     }
+    var tb = tbBox(0.012);   // a beam also keeps clear of the toolbar plate
+    if (tb) {
+        for (var ti = 1; ti < 12; ti++) {
+            var tq = beamPoint(A, C, B, ti / 12), td = Math.max(-tq.z, 1), tx = tq.x / td, ty = tq.y / td;
+            if (tx > tb.x0 && tx < tb.x1 && ty < tb.top) { pen += 0.03; }
+        }
+    }
     return pen;
 }
 function routeArc(c, pref, A, B, perp, dist) {   // presentation only: keep the neighbour-separation preference unless the beam would run through another object, then bend the other way or higher
-    if (nodes.length < 3) { return pref; }
+    if (nodes.length < 3 && !tbBox(0)) { return pref; }
     var cands = [c.arcT === undefined ? pref : c.arcT, pref, -pref, pref * 1.8, -pref * 1.8, pref * 2.6, -pref * 2.6], best = pref, bestPen = 1e9;
     for (var i = 0; i < cands.length; i++) {
         var pen = beamClip(c, cands[i], A, B, perp, dist);
@@ -1565,7 +1586,7 @@ script.api.loadUniverse = loadUniverse;
 // drag the lantern into the flower and the collision's pulse flips cat-lantern to REPEL, so the cat flees back toward the house. Nothing collides by itself.
 var ROOM_LAYOUT = {   // hero sizes 20-40 cm; centres in cm, all about 1.25 m out, inside the default Preview view (+-36 cm wide, -24..+41 cm tall at that depth, above the toolbar); table-resting items sit on FLOOR_Y (the virtual table)
     home: { size: 28, x: -21, y: 24, z: -125 },        // floating island house, high on the left, behind the cat on the side away from the lantern
-    cat: { size: 22, x: -25, y: null, z: -125 },       // standing on the sideboard, left
+    cat: { size: 22, x: -24, y: -16, z: -125 },        // just above the sideboard, left: clear of the real turntable (-27.6, -37.2) and of the lotus
     lantern: { size: 22, x: 16, y: 10, z: -125 },      // floating above the sideboard, right of centre
     flower: { size: 20, x: -3.5, y: null, z: -125 }       // standing on the sideboard, centre (the toolbar is low in the far right corner)
 };
@@ -1944,6 +1965,7 @@ function swapInModel(job, gltf) {
     // fit: scale the model so its bounding sphere matches the orb footprint, and centre it on the node
     var nodeW = n.tr.getWorldPosition(), ht = holder.getTransform();
     var f = (n.size * 0.5) / (b.radius * 1.0), off = b.center.sub(nodeW);
+    if (roomMode() && job.hero) { var ext = b.max.sub(b.min), longest = Math.max(ext.x, ext.y, ext.z); if (longest > 1e-5) { f = Math.min(n.size * 0.5 / b.radius * 1.6, HERO_CM / longest); } }   // a generated model is sized by its longest side (a flat flower no longer shrinks to fit a sphere around its diagonal)
     ht.setLocalScale(vec3.one().uniformScale(f));
     ht.setWorldPosition(nodeW.sub(off.uniformScale(f)));
     var b2 = worldBounds(holder);
@@ -1984,16 +2006,34 @@ function capSlot(job) { var k = 0; for (var i = 0; i < imagineJobs.length; i++) 
 function styleCaption(t) {   // readable on any background: dark outline
     t.outlineSettings.enabled = true; t.outlineSettings.size = 0.5; t.outlineSettings.fill.color = new vec4(0.05, 0.03, 0.2, 1);
 }
+function heroSpot(radius) {   // room: a spot in the visible part of the view clear of every object, every beam and the toolbar; nearest to the middle of the view wins
+    var z0 = spawnPlane(), dep = -z0, vw = script.api.view(), tb = tbBox(0.01), rA = radius * 0.85 / dep, best = null, bestCost = 1e9;
+    var limX = vw.halfW / -WORLD_Z * 0.95 - rA, lo = Math.max(FLOOR_Y / dep + rA + 0.01, -0.2), hi = vw.halfH / -WORLD_Z * 0.97 - rA;
+    var beams = [];
+    for (var ci = 0; ci < connections.length; ci++) { var c = connections[ci]; if (!c.active) { continue; } var A = endOf(c.A), B = endOf(c.B), Cc = c.arcC || A.add(B).uniformScale(0.5); for (var k = 0; k <= 16; k++) { var q = beamPoint(A, Cc, B, k / 16), qd = Math.max(-q.z, 1); beams.push({ x: q.x / qd, y: q.y / qd }); } }
+    for (var pass = 0; pass < 2 && !best; pass++) for (var gy = hi; gy >= lo; gy -= 0.02) {
+        for (var gx = -limX; gx <= limX + 1e-6; gx += 0.02) {
+            var cost = Math.abs(gx) * 0.5 + Math.abs(gy - 0.1) * 0.7, bad = false;
+            if (tb && gx + rA > tb.x0 && gx - rA < tb.x1 && gy - rA < tb.top) { continue; }
+            for (var i = 0; i < nodes.length && !bad; i++) { var n = nodes[i], nd = Math.max(-n.pos.z, 1), ex = n.pos.x / nd - gx, ey = n.pos.y / nd - gy, rr = n.radius * 0.85 / nd + rA + 0.01; if (ex * ex + ey * ey < rr * rr) { bad = true; } }
+            for (var j = 0; j < beams.length && !bad && pass === 0; j++) { var bx = beams[j].x - gx, by = beams[j].y - gy; if (bx * bx + by * by < (rA + 0.015) * (rA + 0.015)) { bad = true; } }
+            if (!bad && cost < bestCost) { bestCost = cost; best = new vec3(gx * dep, gy * dep, z0); }
+        }
+    }
+    return best;
+}
+var HERO_CM = 22;   // the longest side of a generated model in the room (a hero size, like the lantern)
 function imagine(prompt) {
     prompt = cleanPrompt(prompt) || String(prompt || "").trim();
-    var n = spawnNode({ shape: "sphere", color: IMAGINE_COLOR, glow: true, size: imagineSize(), name: "Imagined: " + prompt });
+    var hs = roomMode() ? heroSpot(imagineSize() * 0.5) : null;
+    var n = spawnNode({ shape: "sphere", color: IMAGINE_COLOR, glow: true, size: imagineSize(), name: "Imagined: " + prompt, pos: hs || undefined });
     if (!n) { return -1; }
     if (pendingPlace === n) { pendingPlace = null; }   // it appears at a free spot: nothing waits for a pinch, so no placement hint
     var cap = makeText("Imagine Caption", 60, new vec3(0, captionY(0), WORLD_Z), new vec4(0.85, 0.95, 1, 1));
     styleCaption(cap.text);
     cap.job = null;
     cap.text.text = "Imagining '" + prompt + "'… 0s"; cap.text.renderOrder = 100;
-    var job = { n: n, prompt: prompt, t0: elapsed, state: "pending", result: null, cap: cap, capUntil: 0, cancel: null, reason: "", timeout: imagineTimeout };
+    var job = { hero: true, n: n, prompt: prompt, t0: elapsed, state: "pending", result: null, cap: cap, capUntil: 0, cancel: null, reason: "", timeout: imagineTimeout };
     imagineJobs.push(job);
     n.job = job;
     print("RULESHIFT imagine START '" + prompt + "' (timeout " + job.timeout + "s)");

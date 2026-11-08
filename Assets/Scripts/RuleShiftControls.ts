@@ -213,6 +213,7 @@ export class RuleShiftControls extends BaseScriptComponent {
     const plate = api.makePlate("Toolbar Strip", total + 1.4, plateH, 0.4, new vec3(x0 + total / 2, plateY, Z - 1.2), TB_DARK, -8)
     plate.setParent(this.toolbarRoot)
     this.toolbarPlateTop = plateY + plateH / 2
+    api.setToolbarRect((x0 - 0.7) / (-Z + 1.2), (x0 + total + 0.7) / (-Z + 1.2)) // the toolbar plate's left and right edges: objects and beams keep out of it
     api.setToolbarTop(this.toolbarPlateTop / (-Z + 1.2)) // top edge of the toolbar in angular space (room mode also keeps panels above the sideboard line)
     let x = x0
     const pills: Pill[] = []
