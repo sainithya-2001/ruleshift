@@ -1220,22 +1220,21 @@ if (script.runTests) {
 if (script.genModels) {   // input declared in the header block
     script.createEvent("OnStartEvent").bind(function () {
         var api = script.controller.api, el = 0, st = 0, pending = 0, round = 0;
-        var PROMPTS = { house: "a cozy library house on a floating island", cat: "a cute cat", lantern: "a glowing paper lantern", flower: "a glowing flower" };
+        var PROMPTS = { house: "a floating island with a cozy cottage, a blossoming tree and a glowing waterfall" };   // magic pass: only the island is regenerated (two parallel attempts)
         script.createEvent("UpdateEvent").bind(function (e) {
             el += e.getDeltaTime();
             if (st === 0 && el > 3) {
                 st = 1;
-                (function startRound() {
-                    round++; if (round > 2) { st = 2; return; }
+                [1, 2].forEach(function (tryNo) {
                     Object.keys(PROMPTS).forEach(function (name) {
                         pending++;
                         var t0 = getTime();
                         api.generate(PROMPTS[name], { refine: true }, {
-                            onSuccess: function (g, url) { print("RULESHIFT GEN " + name + " try " + round + " OK secs=" + (getTime() - t0).toFixed(0) + " url=" + url); if (--pending === 0) { startRound(); } },
-                            onFail: function (why) { print("RULESHIFT GEN " + name + " try " + round + " FAIL " + why); if (--pending === 0) { startRound(); } }
+                            onSuccess: function (g, url) { print("RULESHIFT GEN " + name + " try " + tryNo + " OK secs=" + (getTime() - t0).toFixed(0) + " url=" + url); if (--pending === 0) { st = 2; } },
+                            onFail: function (why) { print("RULESHIFT GEN " + name + " try " + tryNo + " FAIL " + why); if (--pending === 0) { st = 2; } }
                         });
                     });
-                })();
+                });
             }
         });
     });
@@ -1311,7 +1310,7 @@ if (script.showUniverse) {
 // Visual check (not a test): load the room preset, wait for a screenshot, press Play, print a marker mid-chase, then drag the lantern into the flower and print a marker once the chain has flipped.
 if (script.showRoom) {
     script.createEvent("OnStartEvent").bind(function () {
-        var api = script.controller.api, T = api.test, st = 0, el = 0, fN = 0, fT = 0, stEl = 0, abSi = -1, abN = [0, 0], abT = [0, 0], abState = -1; T.prof(true);
+        var api = script.controller.api, T = api.test, st = 0, el = 0, fN = 0, fT = 0, stEl = 0, abSi = -1, abN = [0, 0], abT = [0, 0], abState = -1, pulseFrozen = false, pulseFree = false, pulseT = 0, glide = 0, glT = 0; T.prof(true);
         script.createEvent("UpdateEvent").bind(function (e) {
             var d = e.getDeltaTime(); el += d; fN++; fT += d;
             if (fT >= 5) { print("RULESHIFT ROOM fps " + (fN / fT).toFixed(1) + " | " + T.profReport()); fN = 0; fT = 0; }
@@ -1322,7 +1321,7 @@ if (script.showRoom) {
             }
             else if (script.perfSweep && st === 1 && el > 30) {   // frame-cost attribution, interleaved A/B: each subsystem is switched on/off every 5 s for 4 cycles (drift cancels); fps is averaged over the last 3.5 s of each phase
                 var rootSet = function (nm, child, on) { for (var q = 0; q < global.scene.getRootObjectsCount(); q++) { var ro = global.scene.getRootObject(q); if (ro.name === nm) { if (child) { for (var w = 0; w < ro.getChildrenCount(); w++) { if (ro.getChild(w).name === child) { ro.getChild(w).enabled = on; } } } else { ro.enabled = on; } } } };
-                var subs = [["ALL content (vfx, beams, halos, models, ambient, SIK visuals, UI)", function (on) { T.perfSet("vfx", on); T.perfSet("beams", on); T.perfSet("glow", on); T.perfSet("models", on); T.perfSet("ambient", on); rootSet("SpectaclesInteractionKit", "[OPTIONAL] Visuals", on); rootSet("RULESHIFT Controls", null, on); }], ["UI (RULESHIFT Controls)", function (on) { rootSet("RULESHIFT Controls", null, on); }], ["lighting", function (on) { rootSet("Lighting", null, on); }], ["ambient sparkles", function (on) { T.perfSet("ambient", on); }], ["end", function () { }]];
+                var subs = [["ALL content (vfx, beams, halos, models, ambient, pools, SIK visuals, UI)", function (on) { T.perfSet("vfx", on); T.perfSet("beams", on); T.perfSet("glow", on); T.perfSet("models", on); T.perfSet("ambient", on); T.perfSet("pools", on); rootSet("SpectaclesInteractionKit", "[OPTIONAL] Visuals", on); rootSet("RULESHIFT Controls", null, on); }], ["UI (RULESHIFT Controls)", function (on) { rootSet("RULESHIFT Controls", null, on); }], ["lighting", function (on) { rootSet("Lighting", null, on); }], ["ambient sparkles + fireflies + air motes", function (on) { T.perfSet("ambient", on); }], ["light pools + cat aura", function (on) { T.perfSet("pools", on); }], ["beams (core, halo, wave, trail)", function (on) { T.perfSet("beams", on); }], ["end", function () { }]];
                 var t = el - 30, si = Math.floor(t / 40); if (si === subs.length - 1 && abSi >= 0 && abSi !== si) { print("RULESHIFT AB " + subs[abSi][0] + " on " + (abN[0] / Math.max(abT[0], 0.001)).toFixed(2) + " fps, off " + (abN[1] / Math.max(abT[1], 0.001)).toFixed(2) + " fps"); abSi = si; st = 9; subs.forEach(function (x) { x[1](true); }); print("RULESHIFT AB done"); }
                 if (si >= subs.length) { if (st !== 9) { st = 9; subs.forEach(function (x) { x[1](true); }); print("RULESHIFT AB done"); } }
                 else {
@@ -1338,8 +1337,11 @@ if (script.showRoom) {
             else if (!script.perfSweep && st === 1 && el > 6) { st = 2; print("RULESHIFT SHOW room-before"); }
             else if (script.roomPlay && st === 2 && el > 24) { api.activate(); st = 3; stEl = el; print("RULESHIFT SHOW room-play"); }
             else if (st === 3 && el > stEl + 2.5) { st = 4; stEl = el; T.setFixedStep(0.0001); print("RULESHIFT SHOW room-chase (frozen)"); }   // freeze the sim so a screenshot taken a few seconds later shows this exact frame
-            else if (st === 4 && el > stEl + 15) { T.setFixedStep(0); var n = T.nodes; T.place(2, n[3].pos.add(new vec3(0, n[2].radius + n[3].radius - 0.5, 0))); st = 5; stEl = el; print("RULESHIFT SHOW room-collide"); }
-            else if (st === 5 && T.connections.some(function (c) { return c.rule === "REPEL"; })) { st = 6; stEl = el; print("RULESHIFT SHOW room-flipped"); }
+            else if (st === 4 && el > stEl + 15) { T.setFixedStep(0); T.cause.setTime(10); T.pressStart(2); glide = 0; glT = el; st = 5; stEl = el; print("RULESHIFT SHOW room-collide"); }   // the lantern is glided into the lotus while held, so the touch has an approach speed and fires the collision trigger
+            else if (st === 5 && glide < 4 && el > glT + 0.3) { var gn = T.nodes, goff = [9, 6, 3, 0][glide]; gn[2].tr.setLocalPosition(gn[3].pos.add(new vec3(0, gn[2].radius + gn[3].radius - 0.5 + goff, 0))); glide++; glT = el; if (glide === 4) { T.pressEnd(2, true); stEl = el; } }
+            else if (st === 5 && glide >= 4 && !pulseFrozen && el > stEl + 0.8 && T.cause.active() > 0) { pulseFrozen = true; pulseT = el; T.setFixedStep(0.0001); print("RULESHIFT SHOW room-pulse (frozen)"); }   // a cause pulse in flight, held for a screenshot
+            else if (st === 5 && pulseFrozen && !pulseFree && el > pulseT + 14) { pulseFree = true; T.setFixedStep(0); print("RULESHIFT SHOW room-pulse released"); }
+            else if (st === 5 && pulseFree && T.connections.some(function (c) { return c.rule === "REPEL"; })) { st = 6; stEl = el; print("RULESHIFT SHOW room-flipped"); }
             else if (st === 6 && el > stEl + 9) { st = 7; T.setFixedStep(0.0001); print("RULESHIFT SHOW room-fled (frozen)"); }
         });
     });

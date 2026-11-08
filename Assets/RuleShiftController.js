@@ -514,7 +514,7 @@ function setBeamColor(c, col) {
     if (c.segs) { for (var i = 0; i < c.segs.length; i++) { c.segs[i].rmv.mainPass.baseColor = col; } }
     if (c.halo) { var hc = new vec4(col.r * HALO_A, col.g * HALO_A, col.b * HALO_A, HALO_A); for (var h = 0; h < c.halo.length; h++) { c.halo[h].rmv.mainPass.baseColor = hc; } }   // wide soft halo in the rule colour
 }
-var HALO_A = 0.34, HALO_N = 8, CORE_N = 8, BEAM_TRAIL = 4;
+var HALO_A = 0.34, HALO_N = 8, CORE_N = 8, BEAM_TRAIL = 3;
 function applyColor(c) { if (c.segs) { setBeamColor(c, RULE_COLOR[c.rule]); } }
 // A connection is a thin curved beam: BEAM_SEGS additive cylinder segments along a gentle arc, plus BEAM_MOTES small lights flowing source -> target.
 var BEAM_SEGS = 8, BEAM_MOTES = 3, BEAM_FLOW = 0.32, fxT = 0;
@@ -1246,7 +1246,7 @@ function updateModelLife(dt) {
 }
 
 // ---------- ambient sparkles: a few soft motes drifting up from glowing objects ----------
-var AMB_MAX = 6, AMB_LIFE = 1.8, AMB_RATE = 4.5, ambPool = [], ambActive = [], ambAcc = 0, ambSeed = 12345, ambRound = 0;
+var AMB_MAX = 5, AMB_LIFE = 1.8, AMB_RATE = 4.5, ambPool = [], ambActive = [], ambAcc = 0, ambSeed = 12345, ambRound = 0;
 function ambRand() { ambSeed = (ambSeed * 1664525 + 1013904223) % 4294967296; return ambSeed / 4294967296; }
 function glowEmitters() { var out = []; nodes.forEach(function (n) { var k = n.modelRoot ? modelKind(n) : null; if (k === "lantern" || k === "flower" || (n.glowOn && !n.modelRoot)) { out.push(n); } }); return out; }
 // Asset Library VFX (see README CREDITS): Embers drift off the lantern, Sparkles hover over the flower; each is only on while its object exists.
@@ -1302,7 +1302,7 @@ function updateAmbient(dt) {
 }
 
 // ---------- ambient magic: a few fireflies around the lantern, slow dust motes in the air (the lotus's petals/motes are the ambient sparkles above). Hard caps, always kept inside the view. ----------
-var FIREFLY_MAX = 5, AIR_MAX = 5, magicPool = [], fireflies = [], airMotes = [];
+var FIREFLY_MAX = 4, AIR_MAX = 4, magicPool = [], fireflies = [], airMotes = [];
 function magicSprite() {
     var o = global.scene.createSceneObject("Magic Mote"), par = NODE_TMPL.getParent();
     if (par) { o.setParent(par); } o.layer = NODE_TMPL.layer; o.enabled = false;
@@ -1348,7 +1348,7 @@ function updateMagic(dt) {
 // ---------- light pools: soft coloured glow on the room around the glowing creations (additive nested discs, no real lights) ----------
 // A wall halo (camera-facing, just behind the model) and a flat pool on the surface under it (the sideboard top), warm orange for the lantern, pink for the lotus, faint warm for the cat.
 var POOL_KIND = { lantern: { col: [1.0, 0.5, 0.14], wall: 2.5, floor: 2.4, a: 1.0 }, flower: { col: [1.0, 0.28, 0.65], wall: 2.1, floor: 2.1, a: 0.85 }, cat: { col: [1.0, 0.78, 0.45], wall: 1.7, floor: 1.7, a: 0.3 } };
-var POOL_NW = 7, POOL_NF = 5;   // nested discs per wall halo / floor pool: layer i has radius (N - i) / N and adds A * (2i + 1) / N^2, so the sum falls off like (1 - r)^2 without visible rings (the shader squares alpha: colour and alpha are both premultiplied)
+var POOL_NW = 6, POOL_NF = 4;   // nested discs per wall halo / floor pool: layer i has radius (N - i) / N and adds A * (2i + 1) / N^2, so the sum falls off like (1 - r)^2 without visible rings (the shader squares alpha: colour and alpha are both premultiplied)
 var poolDisc = null;
 function poolMesh() {
     if (poolDisc) { return poolDisc; }
@@ -1372,6 +1372,7 @@ function makePool(n, kind) {
         }
     }
     mk(P.wall, "Light Wall", false, POOL_NW); mk(P.floor, "Light Floor", true, POOL_NF);
+    if (kind === "cat") { P.aura = []; mk(P.aura, "Cat Aura", false, 6); }   // a tight warm halo just behind the cat: only its rim shows around the model
     return P;
 }
 function updatePools(dt) {
@@ -1390,6 +1391,16 @@ function updatePools(dt) {
             S.tr.setLocalScale(vec3.one().uniformScale(R * spec.wall * S.L[0]));
             S.pass.baseColor = new vec4(c[0] * al, c[1] * al, c[2] * al, al);
         });
+        if (P.aura) {
+            var br = 0.85 + 0.15 * Math.sin(fxT * 1.3 + i);
+            P.aura.forEach(function (S) {
+                S.o.enabled = on; if (!on) { return; }
+                var al = Math.min(0.8, Math.sqrt(0.5 * S.L[1] * br));
+                S.tr.setWorldPosition(new vec3(n.pos.x + vo.x, n.pos.y + vo.y, n.pos.z - 2));
+                S.tr.setLocalScale(vec3.one().uniformScale(R * 1.5 * S.L[0]));
+                S.pass.baseColor = new vec4(1.0 * al, 0.84 * al, 0.5 * al, al);
+            });
+        }
         P.floor.forEach(function (S) {
             S.o.enabled = on && hf > 0.05; if (!on) { return; }
             var al = Math.min(0.8, Math.sqrt(0.5 * S.L[1] * spec.a * fl * (0.5 + 0.5 * hf))), rs = R * spec.floor * (1 + h / 70) * S.L[0];
