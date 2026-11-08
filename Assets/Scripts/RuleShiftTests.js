@@ -1194,6 +1194,46 @@ if (script.runTests) {
         check("30 and clear of every beam", (function () { var hit = 0; conns.forEach(function (c) { if (!c.active) { return; } var A = c.A.pos, B = c.B.pos, C = c.arcC || A.add(B).uniformScale(0.5); for (var u = 0.05; u < 1; u += 0.1) { var a = (1 - u) * (1 - u), b = 2 * u * (1 - u), d = u * u, qd = Math.max(-(A.z * a + C.z * b + B.z * d), 1), dx = (A.x * a + C.x * b + B.x * d) / qd - g30.pos.x / gd30, dy = (A.y * a + C.y * b + B.y * d) / qd - g30.pos.y / gd30; if (dx * dx + dy * dy < gr30 * gr30) { hit++; } } }); return hit === 0; })());
         api.clearAll(); T.setWorldScale(1); yield 0.3;
 
+        // 31. Final fixes: the cat is ground-bound (never floats), dragged objects stay in the depth range, the pulse head is small, nothing is cut off at the bottom, the rule labels are 1.5x
+        T.setWorldScale(T.ROOM_K); api.reset(); yield 0.3; api.clearAll(); api.loadRoom(); yield 0.8;
+        var cat31 = 1, lan31 = 2, flo31 = 3, c31 = nodes[cat31], l31 = nodes[lan31];
+        check("31 the cat is a ground-bound creature, the lantern is not", T.groundBound(cat31) && !T.groundBound(lan31) && !T.groundBound(flo31));
+        var gy31 = api.floorY + c31.radius, maxDev31 = 0, x0_31 = c31.pos.x, hd0_31 = Math.abs(l31.pos.x - c31.pos.x);
+        api.toggle();
+        for (var f31 = 0; f31 < 100; f31++) { yield 0.1; maxDev31 = Math.max(maxDev31, Math.abs(c31.pos.y - gy31)); }
+        var hd1_31 = Math.abs(l31.pos.x - c31.pos.x);
+        check("31 chasing the floating lantern the cat stays on the surface the whole time (height never changes)", maxDev31 < 0.01, "max deviation " + maxDev31.toFixed(3));
+        check("31 and it walks toward the lantern along the sideboard (horizontal gap shrinks, ends beneath it)", hd1_31 < hd0_31 - 10 && hd1_31 < 12 && c31.pos.x > x0_31 + 3, "gap " + hd0_31.toFixed(1) + " -> " + hd1_31.toFixed(1) + ", cat x " + x0_31.toFixed(1) + " -> " + c31.pos.x.toFixed(1));
+        // fleeing: flip the cat-lantern link to REPEL and let it run: still on the surface
+        var cl31 = conns.filter(function (c) { return (c.A === c31 || c.B === c31) && (c.A === l31 || c.B === l31); })[0];
+        cl31.rule = "REPEL"; var devR31 = 0; for (var g31 = 0; g31 < 60; g31++) { yield 0.1; devR31 = Math.max(devR31, Math.abs(c31.pos.y - gy31)); }
+        check("31 fleeing from the lantern the cat also stays on the surface and moves away", devR31 < 0.01 && Math.abs(l31.pos.x - c31.pos.x) > hd1_31 + 8, "dev " + devR31.toFixed(3) + ", gap " + Math.abs(l31.pos.x - c31.pos.x).toFixed(1));
+        api.toggle(); api.reset(); yield 0.3;
+        // a cat let go in the air drops straight down to the surface
+        T.place(cat31, new vec3(-20, 5, -125)); yield 0.6;
+        check("31 a cat set down in mid-air drops onto the surface", Math.abs(c31.pos.y - gy31) < 0.05, c31.pos.y.toFixed(2) + " vs " + gy31.toFixed(2));
+        api.reset(); yield 0.3;
+        // dragged objects are held inside the world's depth range: the lantern cannot be pulled toward the camera
+        T.pressStart(lan31); l31.tr.setLocalPosition(new vec3(l31.pos.x, l31.pos.y, -50)); yield 0.3;
+        var dz31 = l31.pos.z; l31.tr.setLocalPosition(new vec3(l31.pos.x, l31.pos.y, -400)); yield 0.3; var dzFar31 = l31.pos.z;
+        T.pressEnd(lan31, true); yield 0.3;
+        var rb31 = T.box;
+        check("31 a dragged lantern cannot be pulled close to the camera or pushed past the far wall", dz31 <= rb31.zNear - l31.radius + 0.01 && dzFar31 >= rb31.zFar + l31.radius - 0.01, "near " + dz31.toFixed(1) + ", far " + dzFar31.toFixed(1));
+        api.reset(); yield 0.3;
+        // the pulse: a small head, and models only pop slightly so nothing swells over the view edge
+        var pl31 = T.pulseLook();
+        check("31 the pulse head is small (at most 4 cm) and a model pops by at most 30%", pl31.head <= 4.0 && pl31.amount <= 0.3, "head " + pl31.head.toFixed(1) + ", pop " + pl31.amount);
+        var vw31 = api.view(), cut31 = 0, cutN31 = "";
+        nodes.forEach(function (n) { var d = Math.max(-n.pos.z, 1); if ((n.pos.y - n.radius * (1 + pl31.amount)) / d < -vw31.halfH / 95 * 0.97) { cut31++; cutN31 += n.obj.name + " "; } });
+        check("31 no object, even at the top of its pop, is cut off at the bottom of the view", cut31 === 0, cutN31);
+        var ef31 = null;
+        T.editorFitReset();
+        for (var ri31 = 0; ri31 < 5; ri31++) { var rr31 = ["ATTRACT", "REPEL", "COLLISION_TRIGGER", "TRANSFER", "GROW"][ri31]; T.openEditor(conns[0]); yield 0.3; api.applyEditorRule(rr31); yield 0.2; }
+        T.openEditor(conns[0]); yield 0.3; ef31 = T.editorFit(); T.closeEditor();
+        check("31 the rule labels are 1.5x larger (text size 45, was 30)", ef31.textSize === 45, "size " + ef31.textSize);
+        check("31 every 45-size rule name, with its check mark, fits inside its pill", ef31.widths.length === 5 && ef31.widths.every(function (w) { return w > 0 && w <= ef31.pill - 0.8; }), ef31.widths.map(function (w) { return w.toFixed(2); }).join() + " of " + ef31.pill);
+        api.clearAll(); T.setWorldScale(1); yield 0.3;
+
 
         api.reset();
         var pass =results.filter(function (r) { return r; }).length;

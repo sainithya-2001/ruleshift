@@ -704,18 +704,23 @@ var LINK_GAP = 6;  // visible link length when attracted (room: 6 cm, not scaled
 function gapK() { return roomMode() ? 1 : K; }
 function repK() { return roomMode() ? K * 0.5 : K; }   // repel range: 48 cm in the room, so the cat flees about 20 cm and stays in view
 var REPEL_RANGE = 40, DAMPING = 3.0, MAX_SPEED = 40;
+// Ground-bound creatures (the cat): they stand on the surface (the sideboard top / floor) and never leave it. Forces on them are horizontal only (x, z): toward or away from a target's spot on the surface, so a cat chasing the floating lantern walks beneath it.
+function groundBound(n) { return roomMode() && !n.anchored && modelKind(n) === "cat"; }
+function groundY(n) { return FLOOR_Y + n.radius; }
 function computeForces() {
     nodes.forEach(function (n) { n.force = vec3.zero(); });
     connections.forEach(function (c) {
         var A = c.A, B = c.B;
         var delta = B.pos.sub(A.pos);
         var dist = Math.max(delta.length, 0.01);
-        var dir = delta.uniformScale(1 / dist);   // A -> B
+        var gnd = groundBound(A) || groundBound(B), hd = new vec3(delta.x, 0, delta.z), hdist = hd.length;
+        var dir = gnd ? (hdist > 0.01 ? hd.uniformScale(1 / hdist) : new vec3(groundBound(A) ? 1 : -1, 0, 0)) : delta.uniformScale(1 / dist);   // A -> B (horizontal when a ground-bound creature is involved)
         var f = 0;
         // every length, speed and force is scaled by K, so a room-scale world is an exact K-times copy of the stage dynamics (same timing, K-times the distance)
         if (c.rule === RULES.ATTRACT) {
             var rest = A.radius + B.radius + ((A.anchored || B.anchored) ? 0 : LINK_GAP * gapK());   // a real object has no model to stand off from: the other settles touching its ring
-            f = dist > rest ? script.strength * 30 * K * Math.min(1, (dist - rest) / (10 * K)) : 0;
+            if (gnd) { var restH = Math.sqrt(Math.max(0, rest * rest - delta.y * delta.y)); f = hdist > restH ? script.strength * 30 * K * Math.min(1, (hdist - restH) / (10 * K)) : 0; }   // on the surface the link rests at the horizontal distance that keeps the 3D rest gap, zero when the other object floats high above
+            else { f = dist > rest ? script.strength * 30 * K * Math.min(1, (dist - rest) / (10 * K)) : 0; }
         } else if (c.rule === RULES.REPEL) {
             f = dist < REPEL_RANGE * repK() ? -script.strength * 60 * K * (1 - dist / (REPEL_RANGE * repK())) - 6 * K : 0;
         }
@@ -725,7 +730,7 @@ function computeForces() {
     });
 }
 
-var REARM_GAP = 1.5, PULSE_TIME = 0.5, PULSE_AMOUNT = 0.9;
+var REARM_GAP = 1.5, PULSE_TIME = 0.5, PULSE_AMOUNT = 0.25;   // a small pop (was 0.9: a model swelled to nearly twice its size and spilled past the bottom of the view)
 function flip(rule) { return rule === RULES.ATTRACT ? RULES.REPEL : (rule === RULES.REPEL ? RULES.ATTRACT : rule); }
 function touchEdge(c) {   // edge-triggered: true once when the pair starts touching, re-armed only after they separate by REARM_GAP
     var dd = c.A.pos.distance(c.B.pos), touchD = c.A.radius + c.B.radius;
@@ -774,7 +779,7 @@ function checkCollisions() {
 }
 // ---------- visible cause chains: pooled glowing pulses (unlit additive head + 3-sphere trail) ----------
 var CAUSE_TIME = 0.5, TAP_PULSE_TIME = 0.3, FLASH_TIME = 0.35, CAUSE_POOL = 12;
-var CAUSE_SIZES = [3.8, 3.1, 2.4, 1.7], CAUSE_ALPHA = [1, 0.6, 0.35, 0.18], CAUSE_LAG = 0.07;
+var CAUSE_SIZES = [1.5, 1.2, 0.9, 0.6], CAUSE_ALPHA = [0.8, 0.5, 0.28, 0.14], CAUSE_LAG = 0.07;
 var WHITE4 = new vec4(1, 1, 1, 1);
 var PULSE_PARTS = script.lightFx ? 2 : CAUSE_SIZES.length;   // lightFx (recording only): head plus a 1-sphere trail
 var SPHERE_D = Math.max(SPHERE_MESH.aabbMax.x - SPHERE_MESH.aabbMin.x, 0.0001);
@@ -865,6 +870,7 @@ function integrate(dt) {
         n.vel = n.vel.add(n.force.uniformScale(dt * n.accel)).uniformScale(Math.max(0, 1 - DAMPING * dt));
         var sp = n.vel.length;
         if (sp > MAX_SPEED * K) { n.vel = n.vel.uniformScale(MAX_SPEED * K / sp); }
+        if (groundBound(n)) { n.vel = new vec3(n.vel.x, 0, n.vel.z); }   // never leaves the surface
         var p = n.pos.add(n.vel.uniformScale(dt));
         var q = clampToBox(n, p);
         if (n.rest > 0) {   // bouncy walls: reflect the velocity component that hit the wall
@@ -972,6 +978,13 @@ function clampToBox(n, p) {
         Math.max(n.initial.z - BOX_Z, Math.min(n.initial.z + BOX_Z, p.z)));
 }
 // Soft collision: any overlapping pair is pushed apart to exactly touching. A grabbed object is never pushed.
+function settleGrounded(dt) {   // a ground-bound creature that is let go in the air drops straight down to the surface (and one that sits below it is lifted onto it)
+    nodes.forEach(function (n) {
+        if (n.dragging || !groundBound(n)) { return; }
+        var gy = groundY(n); if (Math.abs(n.pos.y - gy) < 0.001) { return; }
+        n.pos = new vec3(n.pos.x, Math.max(gy, n.pos.y - 130 * dt), n.pos.z); n.tr.setLocalPosition(n.pos);
+    });
+}
 function resolveOverlaps(moveDragged) {   // moveDragged: last resort when the other object is wall-pinned
     for (var i = 0; i < nodes.length; i++) {
         for (var j = i + 1; j < nodes.length; j++) {
@@ -980,6 +993,12 @@ function resolveOverlaps(moveDragged) {   // moveDragged: last resort when the o
             if (dist >= minD) { continue; }
             var dir = dist > 0.001 ? d.uniformScale(1 / dist) : new vec3(1, 0, 0);
             var pen = minD - dist;
+            if (groundBound(A) || groundBound(B)) {   // a ground-bound creature is only ever pushed sideways: the pair just touches when the horizontal gap is sqrt(minD^2 - dy^2); an object floating high above overlaps nothing
+                if (Math.abs(d.y) >= minD) { continue; }
+                var needH = Math.sqrt(minD * minD - d.y * d.y), hv = new vec3(d.x, 0, d.z), hl = hv.length;
+                if (hl >= needH) { continue; }
+                dir = hl > 0.001 ? hv.uniformScale(1 / hl) : new vec3(1, 0, 0); pen = needH - hl;
+            }
             var dA = A.dragging && !moveDragged, dB = B.dragging && !moveDragged;
             var wA = dA ? 0 : (dB ? 1 : 0.5), wB = dB ? 0 : (dA ? 1 : 0.5);
             if (A.anchored || B.anchored) { if (A.anchored && B.anchored) { continue; } wA = A.anchored ? 0 : 1; wB = B.anchored ? 0 : 1; }   // a real object is immovable: only the other one yields
@@ -1544,9 +1563,9 @@ script.api.discoveryVersion = function () { return discoveryVer; };
 // ---------- Rule editor: tapping a link opens a panel of all five rules next to it ----------
 // The panel is drawn at EDITOR.d (nearer than the world, like the Delete pill) and placed in screen/angular space so it never covers
 // an object, a label, the Delete pill, the toolbar or the edge of the view; it is re-placed every frame, so it follows the link.
-// Three compact layouts of the same five pills (column, 3x2 grid, row): the view is mostly filled by the stage, so the panel takes whichever fits best beside the link.
-var EDITOR = { d: 85, pillW: 8.0, pillH: 3.0, gap: 0.4, pad: 0.6, layouts: [] };
-[1, 3, 5].forEach(function (cols) {
+// Three compact layouts of the same five pills (column, 2x3 grid, 3x2 grid; the labels are large, so a single row no longer fits the view): the view is mostly filled by the stage, so the panel takes whichever fits best beside the link.
+var EDITOR = { d: 85, pillW: 11.8, pillH: 3.6, gap: 0.4, pad: 0.6, layouts: [] };
+[1, 2, 3].forEach(function (cols) {
     var rows = Math.ceil(ALL_RULES.length / cols);
     EDITOR.layouts.push({ cols: cols, rows: rows, w: cols * EDITOR.pillW + (cols - 1) * EDITOR.gap + 2 * EDITOR.pad, h: rows * EDITOR.pillH + (rows - 1) * EDITOR.gap + 2 * EDITOR.pad });
 });
@@ -1974,6 +1993,8 @@ script.api.test = {
     magicCount: function () { var c = 0; fireflies.concat(airMotes).forEach(function (m) { if (m.o.enabled) { c++; } }); return c; }, magicMax: FIREFLY_MAX + AIR_MAX,
     ambientMax: AMB_MAX,
     linkColor: function (c) { var k = c.rmv.mainPass.baseColor; return k.r.toFixed(2) + "," + k.g.toFixed(2) + "," + k.b.toFixed(2); },
+    pulseLook: function () { return { head: CAUSE_SIZES[0] * K, amount: PULSE_AMOUNT }; },
+    groundBound: function (i) { return groundBound(nodes[i]); },
     place: function (i, v) { var n = nodes[i]; n.pos = new vec3(v.x, v.y, v.z); n.vel = vec3.zero(); n.tr.setLocalPosition(n.pos); if (pendingPlace === n) { pendingPlace = null; } },
     connect: function (i, j, rule) { var c = slotFor(nodes[i], nodes[j], true); if (!c.active) { activateLink(c, rule || RULES.ATTRACT, true); } return c; },
     labelInfo: function (c) { var e = labelExtent(c); var p = c.labelTr.getWorldPosition(); return { ext: e, nudge: c.labelNudge, y: p.y, hits: e ? labelHitsNode(p, e, c) : null }; },
@@ -2039,6 +2060,7 @@ script.createEvent("UpdateEvent").bind(function (e) {
         resolveOverlaps(it >= 2);
         nodes.forEach(function (n) { if (!n.dragging || it >= 2) { n.pos = clampToBox(n, n.pos); n.tr.setLocalPosition(n.pos); } });
     }
+    settleGrounded(Math.min(fdt, 0.1));
     pm("overlaps"); if (state === "live") { checkCollisions(); }
     updatePulses(dt);
     updateCause(realDt);

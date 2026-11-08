@@ -76,6 +76,7 @@ export class RuleShiftControls extends BaseScriptComponent {
   private toolbarLabels: string[] = []
   private toolbarCenters: number[] = []
   private pillWidth = 9
+  private editorTextSize = 45 // rule labels: 1.5x the old 30
   private pillH = 6.3
   private fitStage = 0
   private fitFrame = 0
@@ -1048,8 +1049,8 @@ export class RuleShiftControls extends BaseScriptComponent {
       const chip = E.pillH * 0.66
       const fill = api.makeRound("Rule Fill " + r.rule, chip, chip, chip / 2, new vec3(0, 0, Z), col, -5, false, null, 0)
       const icon = api.makeRuleIcon(r.rule, chip * 0.74, WHITE, fill, -4)
-      const pill = this.makePill(this.editorRoot, "Rule" + i, r.name, null, new vec3(0, 0, 0.5), new vec2(E.pillW, E.pillH), 30, true) // 38: even "✓ Collision Trigger" stays inside the 8 cm pill (at 42 the longest label with its check mark ran to the pill edge)
-      ;(pill.content as any).padding = {top: 0.2, right: 0.3, bottom: 0.2, left: chip + 0.9} // the words sit to the right of the icon chip
+      const pill = this.makePill(this.editorRoot, "Rule" + i, r.name, null, new vec3(0, 0, 0.5), new vec2(E.pillW, E.pillH), this.editorTextSize, true) // labels are 1.5x the old size (30 -> 45) in a larger pill; 38: even "✓ Collision Trigger" stays inside the 8 cm pill (at 42 the longest label with its check mark ran to the pill edge)
+      ;(pill.content as any).padding = {top: 0.2, right: 0.3, bottom: 0.2, left: chip + 0.8} // the words sit to the right of the icon chip
       pill.button.onTriggerUp.add(() => this.controller.api.applyEditorRule(r.rule))
       pill.button.onInitialized.add(() => {
         pill.button.opacity = 0 // the Button's own grey plate would cover the rule colours drawn behind it
@@ -1060,7 +1061,7 @@ export class RuleShiftControls extends BaseScriptComponent {
     api.test.editorPills = () => this.editorRows.map((row) => ({rule: row.rule, selected: row.border.enabled, fill: this.fillColor(row)}))
     api.test.pressEditorPill = (i: number) => this.controller.api.applyEditorRule(this.editorRows[i].rule)
     api.test.editorShown = () => this.editorShown
-    api.test.editorFit = () => ({widths: this.editorWidths.slice(), pill: E.pillW})
+    api.test.editorFit = () => ({widths: this.editorWidths.slice(), pill: E.pillW, textSize: this.editorTextSize})
     api.test.editorFitReset = () => (this.editorWidths = [])
     api.test.togglePalette = (on: boolean) => this.setPalette(on)
   }
