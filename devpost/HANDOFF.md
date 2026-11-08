@@ -168,10 +168,11 @@ If a skill or tool tries to install AiPreviewAgent*/Leaf, stop and tell the user
 - Fix: the ring and tag of a real object are shifted just enough to stay inside 97% of the visible view (`updateRealVisuals`); the collision circle stays on the object. New test in section 28.
 - Observed, not fixed: after the lantern hits the lotus the lotus drifts under the toolbar's left edge; the lantern-lotus beam passes under the toolbar plate; a generated object can be small and partly hidden by beams.
 
-## Final visual fixes (400/400 tests)
+## Final visual fixes (403/403 tests)
 - Toolbar no-go zone: the controller gets the toolbar plate's angular rectangle (`setToolbarRect` from RuleShiftControls.ts, top = `toolbarTopAng`). In room mode `clampToBox` moves any object whose disc would overlap it out the short way (left or up); beams (`beamClip`/`routeArc`) count samples inside it as clipping, so they arc the other way.
 - Surprise objects: `heroSpot` picks a spot in the visible view clear of nodes, beams and the toolbar (falls back to ignoring beams); a generated model is scaled by its longest side to 22 cm (`HERO_CM`) instead of fitting a sphere around its diagonal, which made flat models small.
-- Cat start moved from (-25, floor) to (-24, -16): it floats about 10 cm above the sideboard, 21.6 cm from the turntable centre (2+ cm of air). There is no room on the floor between the turntable and the lotus for a 22 cm cat. Tests 25 and 27 now accept the cat up to 12 cm above the floor.
+- Cat start is back on the sideboard at (-25, floor) and tests 25/27 require it on the surface again. Only when a real-object node overlaps a node's start does Reset (`stepAsideOfReal`) set that node down on the surface at the nearest free spot (sideways or a little deeper into the room, grid search over the play volume, clear of the other nodes, the view edge and the toolbar). With the turntable the only fit is 18 cm: the cat is scaled to 18 cm (growK, restored to full size by the next Reset without the node) and stands behind-right of the ring at about (-19, floor, -136).
+- The real-object name tag on the surface rides 24 cm above the floor (above the cat's head).
 - Vision fallback limit is 12 s (`VISION_LIMIT`).
 - Screenshots `devpost/screenshots/review2-*.jpg`: room loaded, after flee, after Surprise, cat at the turntable.
-- Observed: with the cat attracted to the turntable its head covers part of the "Turntable" name tag.
+- Screenshots `review3-*.jpg`: room loaded, cat at the turntable, after Reset with a turntable node present.

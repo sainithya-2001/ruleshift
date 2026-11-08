@@ -492,7 +492,9 @@ function updateRealVisuals() {
         n.vOff = new vec3(dx / n.growK, dy / n.growK, 0);
         n.ringBox = { x0: (n.pos.x + dx) / dep - rA, x1: (n.pos.x + dx) / dep + rA, y0: (n.pos.y + dy) / dep - rA, y1: (n.pos.y + dy) / dep + rA };
         n.tag.tr.setWorldScale(vec3.one().uniformScale(s));
-        n.tag.tr.setWorldPosition(new vec3(n.pos.x + dx, n.pos.y + dy + n.radius * 1.15 + 3.0 * s, n.pos.z + 2));
+        var tagY = n.pos.y + dy + n.radius * 1.15 + 3.0 * s;
+        if (roomMode() && n.pos.y - n.radius < FLOOR_Y + 3) { tagY = Math.max(tagY, FLOOR_Y + 24); }   // an object standing on the surface: the name rides above head height of whatever stands beside it (the 22 cm cat)
+        n.tag.tr.setWorldPosition(new vec3(n.pos.x + dx, tagY, n.pos.z + 2));
     }
 }
 script.api.setUiBusyProbe = function (f) { uiBusyProbe = f; };
@@ -1508,6 +1510,30 @@ function setState(st) {
     print("RULESHIFT state -> " + st);
     stateListeners.forEach(function (f) { f(st); });
 }
+function stepAsideOfReal(n) {   // Reset: a node whose start would overlap a real-object node's collision circle is set down beside it, still on the surface. The nearest free spot wins (sideways, or a little deeper into the room); if the full size does not fit, 20 cm then 18 cm cats are tried.
+    var overl = false;
+    for (var ri = 0; ri < nodes.length; ri++) { var Rn = nodes[ri]; if (Rn.anchored && Rn !== n && n.pos.distance(Rn.pos) < n.radius + Rn.radius - 0.3) { overl = true; } }
+    if (!overl || !roomMode()) { return; }
+    var standing = Math.abs(n.pos.y - n.radius - FLOOR_Y) < 0.6, vw = script.api.view(), tb = tbBox(0.004), ks = [1, 20 / 22, 18 / 22], start = n.pos;
+    for (var ki = 0; ki < ks.length; ki++) {
+        var r = n.size * 0.5 * ks[ki], y = standing ? FLOOR_Y + r : start.y, best = null, bestD = 25;
+        for (var z = ROOM.zNear - r; z >= ROOM.zFar + r; z -= 1) {
+            for (var x = -(ROOM.x - r); x <= ROOM.x - r; x += 1) {
+                var p = new vec3(x, y, z), d = p.distance(start); if (d >= bestD) { continue; }
+                var dep = -z, rA = r * 0.8 / dep, ok = Math.abs(x / dep) + rA <= vw.halfW / 95 * 0.95;
+                if (ok && tb && x / dep + rA > tb.x0 && x / dep - rA < tb.x1 && y / dep - rA < tb.top) { ok = false; }
+                for (var oi = 0; oi < nodes.length && ok; oi++) { var O = nodes[oi]; if (O === n) { continue; } if (p.distance(O.anchored ? O.pos : O.initial) < r + O.radius - 0.3) { ok = false; } }
+                if (ok) { best = p; bestD = d; }
+            }
+        }
+        if (best) {
+            n.growK = ks[ki]; applyGrow(n); n.pos = best; n.tr.setLocalPosition(best);
+            print("RULESHIFT reset: " + n.obj.name + " set down beside a real object at " + best.x.toFixed(1) + "," + best.y.toFixed(1) + "," + best.z.toFixed(1) + " (size " + (n.size * ks[ki]).toFixed(1) + ")");
+            return;
+        }
+    }
+    print("RULESHIFT reset: no free spot beside the real object for " + n.obj.name);
+}
 function resetWorld() {   // restores positions; created objects and links are kept
     nodes.forEach(function (n) {
         n.pos = new vec3(n.initial.x, n.initial.y, n.initial.z);
@@ -1515,6 +1541,7 @@ function resetWorld() {   // restores positions; created objects and links are k
         n.growK = 1; applyGrow(n);
         n.tr.setLocalPosition(n.pos);
     });
+    nodes.forEach(function (n) { if (!n.anchored) { stepAsideOfReal(n); } });   // an object whose start overlaps a real-object node is set down beside it instead
     clearCause(); contacts = {}; pendingRewrite = null; realMenu = null;
     connections.forEach(function (c) { c.cooldownUntil = 0; c.touching = false; updateVisual(c); });
     selNode = null; connectArmed = false;
@@ -1586,7 +1613,7 @@ script.api.loadUniverse = loadUniverse;
 // drag the lantern into the flower and the collision's pulse flips cat-lantern to REPEL, so the cat flees back toward the house. Nothing collides by itself.
 var ROOM_LAYOUT = {   // hero sizes 20-40 cm; centres in cm, all about 1.25 m out, inside the default Preview view (+-36 cm wide, -24..+41 cm tall at that depth, above the toolbar); table-resting items sit on FLOOR_Y (the virtual table)
     home: { size: 28, x: -21, y: 24, z: -125 },        // floating island house, high on the left, behind the cat on the side away from the lantern
-    cat: { size: 22, x: -24, y: -16, z: -125 },        // just above the sideboard, left: clear of the real turntable (-27.6, -37.2) and of the lotus
+    cat: { size: 22, x: -25, y: null, z: -125 },       // standing on the sideboard, left
     lantern: { size: 22, x: 16, y: 10, z: -125 },      // floating above the sideboard, right of centre
     flower: { size: 20, x: -3.5, y: null, z: -125 }       // standing on the sideboard, centre (the toolbar is low in the far right corner)
 };

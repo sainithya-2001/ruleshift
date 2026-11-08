@@ -990,7 +990,7 @@ if (script.runTests) {
         check("25 everything is visible from the default camera, down to the sideboard (angular extents)", rn.every(function (n) { var dp = -n.pos.z; return Math.abs(n.pos.x) + n.radius <= tx * dp + 0.01 && n.pos.y + n.radius <= ty * dp + 0.01 && n.pos.y - n.radius >= -ty * dp - 0.01 && n.pos.y - n.radius >= api.floorY - 0.01; }), "tan x " + tx.toFixed(3) + " tan y " + ty.toFixed(3) + " floor " + api.floorY);
         check("25 all objects are inside the room volume", rn.every(function (n) { return Math.abs(n.pos.x) <= rb.x + 0.01 && n.pos.y >= rb.yMin - 0.01 && n.pos.y <= rb.yMax + 0.01 && n.pos.z <= rb.zNear + 0.01 && n.pos.z >= rb.zFar - 0.01; }));
         var rFloor = rn.filter(function (n) { return n.obj.name === "Cat" || n.obj.name === "Flower"; });
-        check("25 the flower rests on the table (the floor of the play volume) and the cat starts within 12 cm above it (clear of the real turntable)", rFloor.length === 2 && rFloor.every(function (n) { var h = n.pos.y - n.radius - api.floorY; return n.obj.name === "Cat" ? (h > -0.6 && h < 12) : Math.abs(h) < 0.6; }), rFloor.map(function (n) { return (n.pos.y - n.radius).toFixed(1); }).join());
+        check("25 the cat and the flower rest on the table (the floor of the play volume)", rFloor.length === 2 && rFloor.every(function (n) { return Math.abs(n.pos.y - n.radius - api.floorY) < 0.6; }), rFloor.map(function (n) { return (n.pos.y - n.radius).toFixed(1); }).join());
         var ys = rn.map(function (n) { return n.pos.y; }).sort(function (a, b) { return a - b; }), hs = 1;
         for (var yi = 1; yi < ys.length; yi++) { if (ys[yi] - ys[yi - 1] > 10) { hs++; } }
         check("25 objects live at different heights (floor, table height, above)", hs >= 3, "bands " + hs);
@@ -1037,7 +1037,7 @@ if (script.runTests) {
         api.reset(); yield 0.3; api.clearAll(); api.loadRoom(); yield 0.8;
         var vw27 = api.view(), n27 = nodes.slice(), cat27 = 1, lan27 = 2, flo27 = 3, hom27 = 0;
         check("27 the floor of the room is the sideboard top (the thin strip at the bottom of the default view)", api.floorY / 125 < -0.277 && api.floorY / 125 > -vw27.halfH / 95, "angular " + (api.floorY / 125).toFixed(3));
-        check("27 the flower visibly stands on the surface (within 1 cm) and the cat hovers just above it (under 12 cm)", [cat27, flo27].every(function (i) { var b = T.visualBottom(i); return b !== null && (i === cat27 ? (b - api.floorY > -1.0 && b - api.floorY < 12) : Math.abs(b - api.floorY) < 1.0); }), [cat27, flo27].map(function (i) { return (T.visualBottom(i) - api.floorY).toFixed(2); }).join());
+        check("27 the cat and the flower visibly stand on the surface (model feet within 1 cm of it)", [cat27, flo27].every(function (i) { var b = T.visualBottom(i); return b !== null && Math.abs(b - api.floorY) < 1.0; }), [cat27, flo27].map(function (i) { return (T.visualBottom(i) - api.floorY).toFixed(2); }).join());
         check("27 the lantern floats above the sideboard and the island house floats higher, on the left", n27[lan27].pos.y - n27[lan27].radius > api.floorY + 15 && n27[hom27].pos.y > n27[lan27].pos.y && n27[hom27].pos.x < 0, "lantern y " + n27[lan27].pos.y.toFixed(0) + " house y " + n27[hom27].pos.y.toFixed(0));
         var tfin = ctl.toolbarFit(), tbLeft = (tfin.centers[0] - tfin.pillWidth / 2) / 95 * 125;
         check("27 the toolbar sits low in the right corner, clear of the cat and the flower", tbLeft > n27[flo27].pos.x + 6 && tbLeft > n27[cat27].pos.x + 20, "toolbar left at 1.25 m: " + tbLeft.toFixed(1) + " cm, flower x " + n27[flo27].pos.x.toFixed(1));
@@ -1175,9 +1175,15 @@ if (script.runTests) {
         check("30 after the collision no object overlaps the toolbar", oo30 === 0, oo30 + " objects, lotus " + nodes[flo30].pos.x.toFixed(1) + "," + nodes[flo30].pos.y.toFixed(1));
         check("30 no beam runs under the toolbar plate", bad30 === 0, bad30 + " samples " + bn30);
         api.toggle(); api.reset(); yield 0.3;
-        // the cat starts clear of the real turntable
-        var tt30 = new vec3(-27.6, -37.2, -125);
-        check("30 the cat starts clearly separate from the turntable's ring (at least 2 cm of air)", nodes[cat30].pos.distance(tt30) >= nodes[cat30].radius + 7.5 + 2, nodes[cat30].pos.distance(tt30).toFixed(1));
+        // with no real object the cat starts on the surface at its place; with a real turntable there, Reset sets it down beside it, still on the surface
+        check("30 without a real object the cat starts standing on the surface at x -25", Math.abs(nodes[cat30].pos.y - nodes[cat30].radius - api.floorY) < 0.6 && Math.abs(nodes[cat30].pos.x + 25) < 0.6, nodes[cat30].pos.x.toFixed(1) + "," + nodes[cat30].pos.y.toFixed(1));
+        var tray30 = new vec3(-0.221, -0.2975, -1); tray30 = tray30.uniformScale(1 / tray30.length);
+        api.setVisionProvider(null); T.realPinchRay(new vec3(0, 0, 0), tray30); yield 0.3; api.chooseReal("Turntable"); yield 0.3;
+        var rt30 = nodes[nodes.length - 1]; api.reset(); yield 0.5;
+        var cp30 = nodes[cat30].pos, ri30 = T.realInfo(nodes.length - 1);
+        check("30 after Reset with a turntable node present the cat stands on the surface and clear of the turntable's collision circle", Math.abs(cp30.y - nodes[cat30].radius - api.floorY) < 0.6 && cp30.distance(rt30.pos) >= nodes[cat30].radius + rt30.radius - 0.5, cp30.x.toFixed(1) + "," + cp30.y.toFixed(1) + "," + cp30.z.toFixed(1) + " d " + cp30.distance(rt30.pos).toFixed(1));
+        check("30 and the Turntable name tag sits above the cat's head", ri30.tagY > api.floorY + nodes[cat30].radius * 2, "tagY " + ri30.tagY.toFixed(1));
+        check("30 removing the turntable and resetting puts the cat back at x -25 at its full 22 cm size", (function () { api.deleteSelected && 0; T.deleteNode(nodes.length - 1); api.reset(); return Math.abs(nodes[cat30].pos.x + 25) < 0.6 && Math.abs(nodes[cat30].radius - 11) < 0.01; })());
         // Surprise: hero size in a free spot
         var n30 = nodes.length, im30 = api.imagine("a glowing alien flower"); yield 0.5;
         var g30 = nodes[im30], gd30 = Math.max(-g30.pos.z, 1), gr30 = g30.radius * 0.85 / gd30, clr30 = true, near30 = "";
