@@ -1209,7 +1209,7 @@ function ambRand() { ambSeed = (ambSeed * 1664525 + 1013904223) % 4294967296; re
 function glowEmitters() { var out = []; nodes.forEach(function (n) { var k = n.modelRoot ? modelKind(n) : null; if (k === "lantern" || k === "flower" || (n.glowOn && !n.modelRoot)) { out.push(n); } }); return out; }
 // Asset Library VFX (see README CREDITS): Embers drift off the lantern, Sparkles hover over the flower; each is only on while its object exists.
 var vfxFollow = null;
-var perf = { vfx: true, beams: true, glow: true, ambient: true, models: true };   // test-only subsystem switches (api.test.perfSet) used to attribute frame cost
+var perf = { vfx: true, beams: true, glow: true, ambient: true, models: true, pools: true };   // test-only subsystem switches (api.test.perfSet) used to attribute frame cost
 function updateVfx() {
     if (!perf.vfx) { if (script.embersVfx) { script.embersVfx.enabled = false; } if (script.sparklesVfx) { script.sparklesVfx.enabled = false; } return; }
     var lan = null, flo = null;
@@ -1255,6 +1255,61 @@ function updateAmbient(dt) {
         s.tr.setWorldPosition(s.p);
         s.tr.setLocalScale(vec3.one().uniformScale(s.size * K * (1 - 0.3 * u) / SPHERE_D));
         s.pass.baseColor = new vec4(s.col.r * al, s.col.g * al, s.col.b * al, al);
+    }
+}
+
+// ---------- light pools: soft coloured glow on the room around the glowing creations (additive nested discs, no real lights) ----------
+// A wall halo (camera-facing, just behind the model) and a flat pool on the surface under it (the sideboard top), warm orange for the lantern, pink for the lotus, faint warm for the cat.
+var POOL_KIND = { lantern: { col: [1.0, 0.5, 0.14], wall: 2.5, floor: 2.4, a: 1.0 }, flower: { col: [1.0, 0.28, 0.65], wall: 2.1, floor: 2.1, a: 0.85 }, cat: { col: [1.0, 0.78, 0.45], wall: 1.7, floor: 1.7, a: 0.3 } };
+var POOL_NW = 7, POOL_NF = 5;   // nested discs per wall halo / floor pool: layer i has radius (N - i) / N and adds A * (2i + 1) / N^2, so the sum falls off like (1 - r)^2 without visible rings (the shader squares alpha: colour and alpha are both premultiplied)
+var poolDisc = null;
+function poolMesh() {
+    if (poolDisc) { return poolDisc; }
+    var N = 28, tris = [];
+    for (var i = 0; i < N; i++) { var a0 = 2 * Math.PI * i / N, a1 = 2 * Math.PI * (i + 1) / N; tris.push([[0, 0, 0], [Math.cos(a0) * 0.5, Math.sin(a0) * 0.5, 0], [Math.cos(a1) * 0.5, Math.sin(a1) * 0.5, 0]], [[0, 0, 0], [Math.cos(a1) * 0.5, Math.sin(a1) * 0.5, 0], [Math.cos(a0) * 0.5, Math.sin(a0) * 0.5, 0]]); }
+    return (poolDisc = buildMesh(tris));
+}
+function makePool(n, kind) {
+    var par = NODE_TMPL.getParent(), P = { kind: kind, wall: [], floor: [] };
+    function mk(list, nm, flat, N) {
+        for (var li = 0; li < N; li++) {
+            var L = [(N - li) / N, (2 * li + 1) / (N * N)];
+            var o = global.scene.createSceneObject(nm + " " + li);
+            if (par) { o.setParent(par); } o.layer = NODE_TMPL.layer;
+            var v = o.createComponent("Component.RenderMeshVisual");
+            v.mesh = poolMesh(); v.mainMaterial = SPHERE_MAT.clone();
+            v.mainPass.blendMode = BlendMode.Add; v.mainPass.depthWrite = false; v.mainPass.depthTest = !flat; v.setRenderOrder(-9);
+            if (flat) { o.getTransform().setLocalRotation(quat.fromEulerAngles(-Math.PI / 2, 0, 0)); }
+            list.push({ o: o, tr: o.getTransform(), pass: v.mainPass, L: L });
+            n.extra = n.extra || []; n.extra.push(o);
+        }
+    }
+    mk(P.wall, "Light Wall", false, POOL_NW); mk(P.floor, "Light Floor", true, POOL_NF);
+    return P;
+}
+function updatePools(dt) {
+    for (var i = 0; i < nodes.length; i++) {
+        var n = nodes[i], k = n.modelRoot ? modelKind(n) : null, spec = k ? POOL_KIND[k] : null;
+        if (!spec) { continue; }
+        if (!n.pool) { n.pool = makePool(n, k); }
+        var P = n.pool, on = perf.pools && roomMode();
+        var fl = k === "lantern" ? 0.88 + 0.07 * Math.sin(fxT * 7 + i) + 0.05 * Math.sin(fxT * 13.3) : 0.9 + 0.1 * Math.sin(fxT * 1.6 + i * 2);
+        var h = Math.max(0, n.pos.y - n.radius - FLOOR_Y), hf = 1 / (1 + h / 22), R = n.radius * 2;
+        var c = spec.col, vo = n.vOff ? n.vOff.uniformScale(n.growK) : vec3.zero();
+        P.wall.forEach(function (S) {
+            S.o.enabled = on; if (!on) { return; }
+            var al = Math.min(0.75, Math.sqrt(0.36 * S.L[1] * spec.a * fl));
+            S.tr.setWorldPosition(new vec3(n.pos.x + vo.x, n.pos.y + vo.y, n.pos.z - 4));
+            S.tr.setLocalScale(vec3.one().uniformScale(R * spec.wall * S.L[0]));
+            S.pass.baseColor = new vec4(c[0] * al, c[1] * al, c[2] * al, al);
+        });
+        P.floor.forEach(function (S) {
+            S.o.enabled = on && hf > 0.05; if (!on) { return; }
+            var al = Math.min(0.8, Math.sqrt(0.5 * S.L[1] * spec.a * fl * (0.5 + 0.5 * hf))), rs = R * spec.floor * (1 + h / 70) * S.L[0];
+            S.tr.setWorldPosition(new vec3(n.pos.x + vo.x, FLOOR_Y + 0.3, n.pos.z + 2));
+            S.tr.setLocalScale(new vec3(rs * 1.3, rs * 0.9, 1));   // flat on the surface (rotated), a little wider than deep
+            S.pass.baseColor = new vec4(c[0] * al, c[1] * al, c[2] * al, al);
+        });
     }
 }
 
@@ -1844,7 +1899,7 @@ script.createEvent("UpdateEvent").bind(function (e) {
     pm("overlaps"); if (state === "live") { checkCollisions(); }
     updatePulses(dt);
     updateCause(realDt);
-    pm("pulses"); updateRewrite(realDt); updateSparkles(realDt); pm("sparkles"); updateAmbient(realDt); pm("ambient"); updateVfx(); updateModelLife(realDt); pm("life");
+    pm("pulses"); updateRewrite(realDt); updateSparkles(realDt); pm("sparkles"); updateAmbient(realDt); pm("ambient"); updateVfx(); updateModelLife(realDt); pm("life"); updatePools(realDt);
     updateImagine(dt);
     updateSelection(); updateRealVisuals();
     hintObj.enabled = !!pendingPlace && !goalEnabled;
