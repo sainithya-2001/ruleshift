@@ -374,12 +374,63 @@ function placeAtScreen(sp) {
     }
     return placeFromRay(o, d);
 }
-script.createEvent("TouchStartEvent").bind(function (e) {
-    var sp = e.getTouchPosition();
-    var editorWas = !!editorLink;
+// A press (a mouse click in Preview, a pinch ray on a device) is resolved in a fixed priority: UI, then nodes, then link beams, and only when nothing virtual is under the ray the real-object pinch.
+// UI, nodes and the beams' tap colliders are found with a physics ray (rayBlocked); because a curved beam can slip between its colliders (and a collider may not be registered yet), nodes and beams are also tested geometrically (virtualHitAt).
+var pressSeq = 0, TAP_W = 6;   // cm: width of the beam tap targets (colliders and the geometric test)
+function virtualHitAt(o, d) {
+    var bestN = null, bestT = 1e9, i;
+    for (i = 0; i < nodes.length; i++) {
+        var n = nodes[i], v = n.pos.sub(o), t = v.dot(d);
+        if (t <= 0) { continue; }
+        var perp = v.sub(d.uniformScale(t)).length;
+        if (perp <= n.radius && t < bestT) { bestT = t; bestN = n; }
+    }
+    if (bestN) { return { kind: "node", n: bestN }; }
+    var bestC = null, bestD = 1e9;
+    for (i = 0; i < connections.length; i++) {
+        var c = connections[i]; if (!c.active || !c.arcC) { continue; }
+        var A = endOf(c.A), B = endOf(c.B);
+        for (var k = 0; k <= 24; k++) {
+            var q = beamPoint(A, c.arcC, B, k / 24), vq = q.sub(o), tq = vq.dot(d);
+            if (tq <= 0) { continue; }
+            var pd = vq.sub(d.uniformScale(tq)).length;
+            if (pd <= TAP_W * 0.5 && pd < bestD) { bestD = pd; bestC = c; }
+        }
+    }
+    return bestC ? { kind: "link", c: bestC } : null;
+}
+function tapLink(c, via) {   // the editor toggles; a mouse click arrives through two paths (the SIK interactor and the press handler), so the second one within 0.45 s is ignored
+    if (!c.active) { return false; }
+    if (c.lastTapAt !== undefined && elapsed - c.lastTapAt < 0.45) { return false; }
+    c.lastTapAt = elapsed;
+    print("RULESHIFT link tapped " + c.A.obj.name + "-" + c.B.obj.name + " via " + via);
+    toggleEditor(c);
+    return true;
+}
+function pointerPress(sp) {
+    var editorWas = !!editorLink, closedLink = editorLink;
     if (editorLink && script.camera) { var a = screenToAng(sp); editorTouch(a.x, a.y); }
-    if (placeAtScreen(sp) === null && !editorWas) { realPinchAtScreen(sp); }
-});
+    var pr = placeAtScreen(sp);
+    if (pr !== null) { return "place"; }
+    if (!script.camera) { return null; }
+    var r = screenRay(sp), vh = virtualHitAt(r.o, r.d);
+    if (vh) {
+        if (vh.kind === "link") { if (!(closedLink === vh.c && !editorLink)) { tapLink(vh.c, "press"); } return "link"; }   // a press that just closed this link's panel leaves it closed
+        return "node";
+    }
+    // UI (and anything else with a collider): the physics ray answers in a later frame (its callback is asynchronous), so the real-object pinch waits for it
+    var tok = ++pressSeq;
+    try {
+        probe = probe || Physics.createGlobalProbe();
+        probe.rayCast(r.o, r.o.add(r.d.uniformScale(400)), function (hit) {
+            if (tok !== pressSeq) { return; }   // a newer press superseded this one
+            if (hit && hit.collider) { return; }   // a button, node or beam target: handled by its own interaction
+            if (!editorWas) { realPinchAtScreen(sp); }
+        });
+    } catch (e) { if (!editorWas) { return realPinchAtScreen(sp); } }
+    return "pending";
+}
+script.createEvent("TouchStartEvent").bind(function (e) { pointerPress(e.getTouchPosition()); });
 
 // ---------- Real-object nodes: pinch a real object in the room, name it from a short list, and it becomes an immovable node ----------
 // The node has no model: a soft glowing ring hugging the real object and a small name tag. It links and obeys every rule like any node, but never moves.
@@ -424,7 +475,7 @@ function openRealMenu(o, d) {   // a ray from the eye through the pinch: the poi
 function realPinchAtScreen(sp) {   // a press on empty space (no object, button or link under it): opens the name list; a press elsewhere while it is open closes it
     if (!script.camera) { return null; }
     var r = screenRay(sp);
-    if (rayBlocked(r.o, r.d)) { return "blocked"; }
+    if (rayBlocked(r.o, r.d) || virtualHitAt(r.o, r.d)) { return "blocked"; }   // never over a node or a beam
     if (realMenu) { realMenu = null; return "cancelled"; }
     if (pendingPlace || connectArmed || (uiBusyProbe && uiBusyProbe())) { return null; }
     openRealMenu(r.o, r.d);
@@ -517,7 +568,7 @@ function setBeamColor(c, col) {
 var HALO_A = 0.34, HALO_N = 8, CORE_N = 8, BEAM_TRAIL = 3;
 function applyColor(c) { if (c.segs) { setBeamColor(c, RULE_COLOR[c.rule]); } }
 // A connection is a thin curved beam: BEAM_SEGS additive cylinder segments along a gentle arc, plus BEAM_MOTES small lights flowing source -> target.
-var BEAM_SEGS = 8, BEAM_MOTES = 3, BEAM_FLOW = 0.32, fxT = 0;
+var TAP_SEGS = 6, BEAM_SEGS = 8, BEAM_MOTES = 3, BEAM_FLOW = 0.32, fxT = 0;
 function makeBeam(c, mesh, mat) {
     var par = NODE_TMPL.getParent();
     var root = global.scene.createSceneObject("Beam");
@@ -576,6 +627,13 @@ function makeSlot(A, B) {
     makeBeam(c, pmesh, pmat);
     visual.getTransform().setLocalScale(vec3.one());
     c.collider = visual.getComponent("Component.ColliderComponent");
+    c.tapCols = []; c.tapRegistered = false;   // tap targets that follow the curved beam: TAP_SEGS boxes along the arc, moved every frame
+    for (var ti = 0; ti < TAP_SEGS; ti++) {
+        var to = global.scene.createSceneObject("Link Tap " + ti); to.setParent(visual); to.layer = visual.layer;
+        var tcol = to.createComponent("Physics.ColliderComponent"), tsh = Shape.createBoxShape(); tsh.size = new vec3(TAP_W, 1, TAP_W); tcol.shape = tsh; tcol.fitVisual = false;
+        if (c.collider && c.collider.intangible !== undefined) { tcol.intangible = c.collider.intangible; }
+        c.tapCols.push(tcol);
+    }
     c.pop = -1; c.flash = -1; c.active = false;
     var lo = global.scene.createSceneObject("Rule Label");
     c.labelObj = lo;
@@ -1223,9 +1281,19 @@ function updateVisual(c) {
         T.tr.setLocalScale(vec3.one().uniformScale(T.size * K * (1 - 0.4 * tu) / SPHERE_D));
         T.pass.baseColor = new vec4(tcol.r * ta, tcol.g * ta, tcol.b * ta, ta);
     }
-    if (c.collider) {   // wide invisible tap target, shorter than the span so objects stay grabbable
+    if (c.tapCols && c.tapCols.length) {   // tap targets follow the arc: boxes between wave-free arc points, trimmed where the beam is inside an object so the objects stay grabbable
+        var uA = Math.max(0.04, (c.A.radius + 0.5) / dist), uB = Math.min(0.96, 1 - (c.B.radius + 0.5) / dist);
+        if (uB - uA < 0.1) { uA = 0.4; uB = 0.6; }
+        for (var tk = 0; tk < c.tapCols.length; tk++) {
+            var p0 = beamPoint(A, C, B, uA + (uB - uA) * tk / c.tapCols.length), p1 = beamPoint(A, C, B, uA + (uB - uA) * (tk + 1) / c.tapCols.length);
+            var td = p1.sub(p0), tl = Math.max(td.length, 0.05), tcol2 = c.tapCols[tk], tobj = tcol2.getSceneObject(), trr = quat.rotationFromTo(UP, td.uniformScale(1 / tl));
+            tobj.getTransform().setWorldPosition(p0.add(p1).uniformScale(0.5)); tobj.getTransform().setWorldRotation(trr);
+            var tsh2 = tcol2.shape; tsh2.size = new vec3(TAP_W, tl * 1.12, TAP_W); tcol2.shape = tsh2;
+        }
+    }
+    if (c.collider) {   // the old straight chord target: full size only until the arc targets are registered with the interactor (then a token size, so it cannot catch clicks the arc does not)
         var sh = c.collider.shape;
-        sh.size = new vec3(6 * K, Math.max(dist - c.A.radius - c.B.radius, 1), 6 * K);
+        sh.size = c.tapRegistered ? new vec3(0.2, 0.2, 0.2) : new vec3(6 * K, Math.max(dist - c.A.radius - c.B.radius, 1), 6 * K);
         c.collider.shape = sh;
     }
 }
@@ -1845,6 +1913,13 @@ script.api.spawnSaved = function (name) {
     return nodeIndex(n);
 };
 script.api.deleteSelected = function () { return selNode ? deleteNode(selNode) : false; };
+script.api.selectedLinks = function () {   // the selected node's links, for the "Rules" pill list: "-> Lantern"
+    if (!selNode) { return []; }
+    var out = [];
+    connections.forEach(function (c) { if (c.active && (c.A === selNode || c.B === selNode)) { var o = c.A === selNode ? c.B : c.A; out.push({ i: connections.indexOf(c), name: String(o.obj.name).replace(/\s*\d+$/, ""), rule: c.rule }); } });
+    return out;
+};
+script.api.openLinkEditor = function (i) { var c = connections[i]; if (!c || !c.active) { return false; } selNode = null; connectArmed = false; openEditor(c); return true; };
 script.api.selectedInfo = function () {
     if (!selNode) { return null; }
     // busy: an "Imagining…" / failure caption is showing above this node, so the Delete pill stays hidden (it would overlap the caption)
@@ -1939,6 +2014,14 @@ script.api.test = {
     tap: function (i) { handleTapNode(nodes[i]); },
     pressStart: function (i) { pressStartNode(nodes[i]); },
     realPinchRay: function (o, d) { openRealMenu(o, d); },
+    pointerPress: function (sp) { return pointerPress(sp); },   // the press handler a mouse click runs (TouchStartEvent calls the same function)
+    screenOf: function (p) { return script.camera.worldSpaceToScreenSpace(p); },
+    beamPointAt: function (i, u) { var c = connections[i]; return beamPoint(endOf(c.A), c.arcC, endOf(c.B), u); },
+    tapProbe: function (sp, cb) { var r = screenRay(sp); probe = probe || Physics.createGlobalProbe(); probe.rayCast(r.o, r.o.add(r.d.uniformScale(400)), function (hit) { var who = null; if (hit && hit.collider) { connections.forEach(function (c, i) { if ((c.tapCols || []).indexOf(hit.collider) >= 0 || c.collider === hit.collider) { who = "link " + i; } }); nodes.forEach(function (n, i) { if (n.obj.getComponent("Component.ColliderComponent") === hit.collider) { who = "node " + i; } }); if (!who) { who = "other " + hit.collider.getSceneObject().name; } } cb(who); }); },
+    tapColliders: function (i) { return connections[i].tapCols.length; },
+    tapRegistered: function (i) { return !!connections[i].tapRegistered; },
+    realMenuOpen: function () { return !!realMenu; },
+    virtualHitScreen: function (sp) { var r = screenRay(sp), h = virtualHitAt(r.o, r.d); return h ? h.kind : null; },
     realPinchScreen: function (sp) { return realPinchAtScreen(sp); },
     spawnReal: function (name, size, pos) { return nodes.indexOf(spawnRealNode(name, size, pos)); },
     realInfo: function (i) { var n = nodes[i]; return n && n.real ? { anchored: !!n.anchored, radius: n.radius, rings: n.rings.length, tag: n.tag.text.text, tagY: n.tag.tr.getWorldPosition().y, modelVisible: n.parts.some(function (p) { return p.rmv.enabled; }), ringBox: n.ringBox, tagAng: { x: n.tag.tr.getWorldPosition().x / Math.max(-n.pos.z, 1), y: n.tag.tr.getWorldPosition().y / Math.max(-n.pos.z, 1) }, pos: n.pos, trPos: n.tr.getLocalPosition() } : null; },
@@ -1956,6 +2039,8 @@ script.api.test = {
     },
     openEditor: openEditor, closeEditor: function () { closeEditor("test"); }, editorTouch: editorTouch, toggleEditor: toggleEditor,
     editorOpen: function () { return editorLink ? slots.indexOf(editorLink) : -1; },
+    editorIs: function (i) { return !!editorLink && editorLink === connections[i]; },
+    editorEnds: function () { return editorLink ? [editorLink.A, editorLink.B] : null; },
     editorRect: function () { return editorRect; },
     editorOverlaps: function () {   // how many things the placed panel covers (nodes, labels, Delete pill) plus whether it leaves the view / touches the toolbar
         if (!editorRect) { return -1; }
@@ -2036,7 +2121,8 @@ script.createEvent("UpdateEvent").bind(function (e) {
                 if (sc.onTriggerCanceled) { sc.onTriggerCanceled.add(function () { pressEndNode(n, false); }); }
             } else {
                 var c = pb.c;
-                sc.onTriggerStart.add(function () { if (c.active) { toggleEditor(c); } });
+                sc.onTriggerStart.add(function () { tapLink(c, "interactor"); });
+                if (script.api.registerLinkColliders) { try { c.tapRegistered = !!script.api.registerLinkColliders(sc, c.tapCols); } catch (er) { c.tapRegistered = false; } }
             }
         });
         if (done) { pendingBinds.splice(pi, 1); }

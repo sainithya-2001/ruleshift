@@ -1,5 +1,6 @@
 import {Button} from "SpectaclesUIKit.lspkg/Scripts/Components/Button/Button"
 import {ElementContent} from "SpectaclesUIKit.lspkg/Scripts/Components/Content/ElementContent"
+import {InteractionManager} from "SpectaclesInteractionKit.lspkg/Core/InteractionManager/InteractionManager"
 import {snap3DGenerate} from "./Snap3DGenerator"
 import {getSnapToken} from "./Snap3DConfig"
 import {RealVision} from "./RealVision"
@@ -115,6 +116,10 @@ export class RuleShiftControls extends BaseScriptComponent {
   private connectPlate: SceneObject
   private connectPill: Pill
   private connectHint: Text
+  private rulesObj: SceneObject
+  private rulesPlate: SceneObject
+  private rulesOpen = false
+  private linkRows: {obj: SceneObject; plate: SceneObject; pill: Pill; idx: number}[] = []
   private editorWidths: number[] = []
   private createW = 16
   private createH = 20
@@ -752,6 +757,41 @@ export class RuleShiftControls extends BaseScriptComponent {
     this.connectPill.button.onTriggerUp.add(() => this.controller.api.connectSelected())
     this.connectHint = this.makeLabel(this.sceneObject, "ConnectHint", "Tap another object", 50, new vec4(1, 0.95, 0.45, 1), new vec3(0, 0, -70))
     this.connectHint.sceneObject.enabled = false
+    // "Rules": the backup way to reach a link's rule panel. It lists the selected object's links ("→ Lantern"); tapping one opens that link's panel.
+    this.rulesPlate = api.makePlate("Rules Plate", PILL_W, PILL_H, 0.4, new vec3(0, 0, Z), PILL, -7)
+    const rp = this.makePill(this.sceneObject, "RulesButton", "Rules", null, new vec3(0, 0, Z), new vec2(PILL_W, PILL_H), 42)
+    this.rulesObj = rp.button.sceneObject
+    this.rulesObj.enabled = false
+    this.rulesPlate.enabled = false
+    rp.button.onTriggerUp.add(() => {
+      this.rulesOpen = !this.rulesOpen
+    })
+    for (let i = 0; i < 7; i++) {
+      const plate = api.makePlate("Link Row Plate " + i, PILL_W, PILL_H, 0.4, new vec3(0, 0, Z), PILL, -7)
+      const pill = this.makePill(this.sceneObject, "LinkRow" + i, "→", null, new vec3(0, 0, Z), new vec2(PILL_W, PILL_H), 36)
+      const row = {obj: pill.button.sceneObject, plate, pill, idx: -1}
+      pill.button.onTriggerUp.add(() => {
+        if (row.idx >= 0 && this.controller.api.openLinkEditor(row.idx)) this.rulesOpen = false
+      })
+      row.obj.enabled = false
+      plate.enabled = false
+      this.linkRows.push(row)
+    }
+    // SIK only knows the colliders that were on a link's Interactable when it registered; the beam's tap targets that follow the arc are added to it here
+    api.registerLinkColliders = (interactable: any, cols: ColliderComponent[]) => {
+      interactable.colliders = (interactable.colliders || []).concat(cols)
+      InteractionManager.getInstance().registerInteractable(interactable)
+      return true
+    }
+    api.test.rulesPillShown = () => this.rulesObj.enabled
+    api.test.rulesListShown = () => this.linkRows.filter((r) => r.obj.enabled).map((r) => r.pill.content.text)
+    api.test.pressRules = () => {
+      this.rulesOpen = !this.rulesOpen
+    }
+    api.test.pressLinkRow = (i: number) => {
+      const row = this.linkRows[i]
+      if (row && row.idx >= 0 && this.controller.api.openLinkEditor(row.idx)) this.rulesOpen = false
+    }
   }
 
   // ---- Real-object list: opens beside a pinch on empty space; one pick anchors a named node on the real object there ----
@@ -859,6 +899,22 @@ export class RuleShiftControls extends BaseScriptComponent {
     this.realRect = {x: cx, y: cy, hw: hw, hh: hh}
   }
 
+  private setLinkRows(links: any[], lx: number, cy: number, D: number) {
+    const n = Math.min(links.length, this.linkRows.length)
+    const pitch = (PILL_H + 0.4) / D
+    this.linkRows.forEach((row, i) => {
+      const on = i < n
+      row.obj.enabled = on
+      row.plate.enabled = on
+      row.idx = on ? links[i].i : -1
+      if (!on) return
+      row.pill.content.text = "→ " + links[i].name
+      const y = cy + ((n - 1) / 2 - i) * pitch
+      row.obj.getTransform().setWorldPosition(new vec3(lx * D, y * D, -D))
+      row.plate.getTransform().setWorldPosition(new vec3(lx * D, y * D, -D - 0.6))
+    })
+  }
+
   private connectPlateColor(): number[] {
     const c = this.connectPlate.getComponent("Component.RenderMeshVisual").mainPass.baseColor
     return [c.r, c.g, c.b]
@@ -874,13 +930,22 @@ export class RuleShiftControls extends BaseScriptComponent {
       this.connectObj.enabled = false
       this.connectPlate.enabled = false
       this.connectHint.sceneObject.enabled = false
+      this.rulesObj.enabled = false
+      this.rulesPlate.enabled = false
+      this.setLinkRows([], 0, 0, 0)
+      this.rulesOpen = false
       if (api.setPillRect) api.setPillRect(null)
       return
     }
+    const links: any[] = api.selectedLinks ? api.selectedLinks() : []
+    const hasRules = links.length > 0
+    if (!hasRules) this.rulesOpen = false
     this.deleteObj.enabled = true
     this.deletePlate.enabled = true
     this.connectObj.enabled = true
     this.connectPlate.enabled = true
+    this.rulesObj.enabled = hasRules
+    this.rulesPlate.enabled = hasRules
     // beside the object (right of it, or left when the right side is off the view), at the nearer depth D; the gaps are angular so any room depth gets the same on-screen spacing
     const D = 70
     const dep = Math.max(-info.z, 1)
@@ -888,7 +953,8 @@ export class RuleShiftControls extends BaseScriptComponent {
     const ay = info.y / dep
     const ar = info.r / dep
     const hw = (PILL_W / 2 + 0.4) / D
-    const hh = (PILL_H + 0.1 + 0.4) / D
+    const rows = hasRules ? 3 : 2
+    const hh = (rows * PILL_H / 2 + 0.1 + 0.4) / D
     const v = api.view()
     const lim = v.halfW / -Z
     let cx = ax + ar + 0.012 + hw
@@ -898,10 +964,23 @@ export class RuleShiftControls extends BaseScriptComponent {
     const hi = v.halfH / -Z - hh - 0.01
     const cy = Math.max(lo, Math.min(hi, ay))
     const off = (PILL_H / 2 + 0.2) / D
-    this.connectObj.getTransform().setWorldPosition(new vec3(cx * D, (cy + off) * D, -D))
-    this.connectPlate.getTransform().setWorldPosition(new vec3(cx * D, (cy + off) * D, -D - 0.6))
-    this.deleteObj.getTransform().setWorldPosition(new vec3(cx * D, (cy - off) * D, -D))
-    this.deletePlate.getTransform().setWorldPosition(new vec3(cx * D, (cy - off) * D, -D - 0.6))
+    const step = hasRules ? (PILL_H + 0.4) / D : 2 * off
+    const yC = cy + (hasRules ? step : off) // Connect on top, Rules in the middle, Remove below
+    const yD = cy - (hasRules ? step : off)
+    this.connectObj.getTransform().setWorldPosition(new vec3(cx * D, yC * D, -D))
+    this.connectPlate.getTransform().setWorldPosition(new vec3(cx * D, yC * D, -D - 0.6))
+    this.deleteObj.getTransform().setWorldPosition(new vec3(cx * D, yD * D, -D))
+    this.deletePlate.getTransform().setWorldPosition(new vec3(cx * D, yD * D, -D - 0.6))
+    if (hasRules) {
+      this.rulesObj.getTransform().setWorldPosition(new vec3(cx * D, cy * D, -D))
+      this.rulesPlate.getTransform().setWorldPosition(new vec3(cx * D, cy * D, -D - 0.6))
+      this.rulesPlate.getComponent("Component.RenderMeshVisual").mainPass.baseColor = this.rulesOpen ? ARMED : PILL
+    }
+    // the link list: a column beside the pills, on the side away from the object
+    const dirOut = cx >= ax ? 1 : -1
+    let lx = cx + dirOut * (2 * hw + 0.004)
+    if (Math.abs(lx) + hw > lim - 0.01) lx = cx - dirOut * (2 * hw + 0.004) // no room outside: it goes on the object's side
+    this.setLinkRows(this.rulesOpen && hasRules ? links : [], lx, cy, D)
     const armed = !!api.connectArmed && api.connectArmed()
     this.connectPlate.getComponent("Component.RenderMeshVisual").mainPass.baseColor = armed ? ARMED : PILL
     // armed: a hint beside the pills (above them, or below when they sit at the top of the view)

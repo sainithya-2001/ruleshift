@@ -10,6 +10,7 @@
 // @input bool perfSweep = false
 // @input bool showEditor = false
 // @input bool showGrow = false
+// @input bool only32 = false
 // @input bool showShots = false
 // @input bool shotsPulses = false
 // @input string liveImaginePrompt = "a floating paper lantern"
@@ -36,7 +37,49 @@ if (script.runTests) {
             }
         }
     }
+    function* section32() {
+        // 32. Click priority and beam tap targets, driven through the press path a mouse click takes (T.pointerPress is the function TouchStartEvent runs; T.tapProbe is the physics ray the SIK interactor casts)
+        T.setWorldScale(T.ROOM_K); api.reset(); yield 0.3; api.clearAll(); api.loadRoom(); yield 0.8; api.activate(); yield 0.6;   // just after Play, while the cat is still far from the lantern and the beam is long
+        var cat32 = 1, lan32 = 2, cl32 = -1;
+        conns.forEach(function (c, ci) { if ((c.A === nodes[cat32] && c.B === nodes[lan32]) || (c.A === nodes[lan32] && c.B === nodes[cat32])) { cl32 = ci; } });
+        check("32 the cat-lantern link exists and its arc tap targets are registered with the interactor", cl32 >= 0 && T.tapColliders(cl32) >= 5 && T.tapRegistered(cl32), "link " + cl32 + " segs " + (cl32 >= 0 ? T.tapColliders(cl32) : "-") + " reg " + (cl32 >= 0 ? T.tapRegistered(cl32) : "-"));
+        var okRay32 = true, okPress32 = true, rayN32 = "", pressN32 = "", nn32 = nodes.length, uu32 = [0.4, 0.5, 0.6];
+        for (var ui32 = 0; ui32 < uu32.length; ui32++) {
+            yield 0.3;   // the beam keeps moving while running: aim at its position now
+            var bp32 = T.beamPointAt(cl32, uu32[ui32]), sp32 = T.screenOf(bp32), hit32 = "(no callback)"; T.tapProbe(sp32, function (w) { hit32 = w; }); yield 0.2;   // the physics ray answers in a later frame
+            if (hit32 !== "link " + cl32) { okRay32 = false; rayN32 += uu32[ui32] + ":" + hit32 + " "; }
+            T.closeEditor(); yield 0.6;
+            var res32 = T.pointerPress(sp32);
+            if (res32 !== "link" || !T.editorIs(cl32) || nodes.length !== nn32 || T.realMenuOpen()) { okPress32 = false; pressN32 += uu32[ui32] + ":" + res32 + "/" + T.editorIs(cl32) + "/" + nodes.length + "/" + T.realMenuOpen() + " "; }
+        }
+        check("32 a physics ray through the arc at 40%, 50% and 60% of the cat-lantern beam hits that beam's tap target", okRay32, rayN32);
+        check("32 a press mid-arc on the cat-lantern beam while Running opens its rule panel and creates no real-object node", okPress32, pressN32);
+        T.closeEditor(); yield 0.6;
+        // a press 2 cm beside the beam still counts; a press on a node does not create a real node either
+        var bm32 = T.beamPointAt(cl32, 0.5), sideP32 = bm32.add(new vec3(0, 2, 0)), rr32 = T.pointerPress(T.screenOf(sideP32));
+        check("32 a press within 2 cm of the beam still opens its panel (never a real-object node)", rr32 === "link" && T.editorIs(cl32) && !T.realMenuOpen() && nodes.length === nn32, rr32 + " editor " + T.editorIs(cl32));
+        T.closeEditor(); yield 0.6;
+        var nr32 = T.pointerPress(T.screenOf(nodes[cat32].pos));
+        check("32 a press on a node is a node hit, not a real-object pinch", nr32 === "node" && !T.realMenuOpen() && nodes.length === nn32, nr32);
+        var pl32 = null; (function find(o) { if (o.name === "Pill1" && !pl32) { pl32 = o; } for (var q = 0; q < o.getChildrenCount(); q++) { find(o.getChild(q)); } })(global.scene.getRootObject(0)); for (var rq32 = 1; rq32 < global.scene.getRootObjectsCount() && !pl32; rq32++) { (function find(o) { if (o.name === "Pill1" && !pl32) { pl32 = o; } for (var q = 0; q < o.getChildrenCount(); q++) { find(o.getChild(q)); } })(global.scene.getRootObject(rq32)); }
+        var ur32 = pl32 ? T.pointerPress(T.screenOf(pl32.getTransform().getWorldPosition())) : "no toolbar pill found"; yield 0.4;
+        check("32 a press on a toolbar button is a UI hit: no real-object list opens and no node is created", pl32 && !T.realMenuOpen() && nodes.length === nn32, "" + ur32 + " menu " + T.realMenuOpen());
+        var er32 = T.pointerPress(T.screenOf(new vec3(30, 33, -125))); yield 0.4;
+        check("32 a press on empty space away from every node, beam and button still opens the real-object list", T.realMenuOpen(), "" + er32);
+        T.pointerPress(T.screenOf(new vec3(30, 33, -125))); yield 0.3;
+        // the Rules pill: select the cat, open the list, pick the lantern link
+        T.closeEditor(); T.tap(cat32); yield 0.6;
+        check("32 with the cat selected a Rules pill is shown beside Connect and Remove", T.rulesPillShown());
+        T.pressRules(); yield 0.6;
+        var rl32 = T.rulesListShown();
+        check("32 tapping Rules lists the cat's links (\u2192 Lantern)", rl32.length >= 1 && rl32.join("|").indexOf("Lantern") >= 0, rl32.join("|"));
+        T.pressLinkRow(0); yield 0.6;
+        check("32 tapping a listed link opens that link's rule panel", (function () { var e = T.editorEnds(); return !!e && (e[0] === nodes[cat32] || e[1] === nodes[cat32]); })(), "editor " + JSON.stringify(!!T.editorEnds()));
+        T.closeEditor(); api.toggle(); api.reset(); yield 0.3;
+        api.clearAll(); T.setWorldScale(1); yield 0.3;
+    }
     function* run() {
+        if (script.only32) { yield 1; yield* section32(); var qp = results.filter(function (r) { return r; }).length; print("RULESHIFT TEST SUMMARY: " + qp + "/" + results.length + " PASS" + (qp === results.length ? " - ALL PASS" : " - FAILURES")); return; }   // quick path for section 32 alone (only32)
         yield 0.3;
         var startCount = api.count();
         T.setWorldScale(1);   // the original checks are written for the legacy stage scale; section 25 covers the room scale
@@ -1086,8 +1129,9 @@ if (script.runTests) {
         check("28 every type creates a node with its default size and its own name tag", okSz28, bad28);
         var before28 = nodes.length; T.realPinchRay(new vec3(0, 0, 0), new vec3(0.2, 0.1, -1).uniformScale(1 / new vec3(0.2, 0.1, -1).length)); yield 0.1; var cn28 = api.chooseReal(null); yield 0.2;
         check("28 Cancel creates nothing and closes the list", nodes.length === before28 && api.realMenuInfo() === null && cn28 === null);
-        var sp28 = T.realPinchScreen(new vec2(0.5, 0.06)); yield 0.2; var open28 = api.realMenuInfo() !== null;
-        var sp28b = T.realPinchScreen(new vec2(0.5, 0.06)); yield 0.2;
+        var pt28 = [new vec2(0.5, 0.06), new vec2(0.15, 0.06), new vec2(0.85, 0.06), new vec2(0.5, 0.03), new vec2(0.12, 0.2)].filter(function (q) { return T.virtualHitScreen(q) === null; })[0] || new vec2(0.5, 0.06);   // a press never lands on a node or a beam any more, so the empty spot is chosen among a few candidates
+        var sp28 = T.realPinchScreen(pt28); yield 0.2; var open28 = api.realMenuInfo() !== null;
+        var sp28b = T.realPinchScreen(pt28); yield 0.2;
         check("28 a press on empty screen opens the list and a second press elsewhere closes it again", sp28 === "menu" && open28 && sp28b !== null && api.realMenuInfo() === null, sp28 + "/" + sp28b);
         // link and rules
         var init28 = new vec3(nodes[ti28].pos.x, nodes[ti28].pos.y, nodes[ti28].pos.z);
@@ -1232,7 +1276,7 @@ if (script.runTests) {
         T.openEditor(conns[0]); yield 0.3; ef31 = T.editorFit(); T.closeEditor();
         check("31 the rule labels are 1.5x larger (text size 45, was 30)", ef31.textSize === 45, "size " + ef31.textSize);
         check("31 every 45-size rule name, with its check mark, fits inside its pill", ef31.widths.length === 5 && ef31.widths.every(function (w) { return w > 0 && w <= ef31.pill - 0.8; }), ef31.widths.map(function (w) { return w.toFixed(2); }).join() + " of " + ef31.pill);
-        api.clearAll(); T.setWorldScale(1); yield 0.3;
+        yield* section32();
 
 
         api.reset();
